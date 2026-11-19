@@ -616,6 +616,19 @@ scenarios.activities = function()
         "accepted volunteer counted toward roles")
     A:Update(id, { category = "dungeons", title = "RFC run", expiresAt = a.expiresAt, roles = a.roles, capacity = 2 })
     check(A:EffectiveStatus(A:Get(id)) == "full", "full when the group reaches its size")
+    peerSend(CH, "REC", { y = "signup", r = { id = id .. "|Thrall Stormrage", owner = "Thrall Stormrage", rev = 2,
+        updatedAt = now, activityId = id, role = "tank", state = "withdrawn" } })
+    a = A:Get(id)
+    local v1 = A:Volunteers(a)[1]
+    check(A:AcceptedCount(a) == 0 and (A:RoleFill(a).tank or 0) == 0 and A:ActiveVolunteerCount(a) == 0
+        and v1.withdrewAfterAccept and not v1.accepted, "accepted volunteer who withdraws frees the slot")
+    check(A:EffectiveStatus(a) == "open", "group no longer full after the withdrawal")
+    check(printedContains("Thrall Stormrage withdrew from"), "organizer told about the withdrawal")
+    peerSend(CH, "REC", { y = "signup", r = { id = id .. "|Thrall Stormrage", owner = "Thrall Stormrage", rev = 3,
+        updatedAt = now, activityId = id, role = "tank", state = "volunteered" } })
+    a = A:Get(id)
+    check(A:AcceptedCount(a) == 1 and A:Volunteers(a)[1].accepted and A:EffectiveStatus(a) == "full",
+        "re-volunteering restores the accepted slot")
 
     -- A guildmate's request
     local tid = "Thrall Stormrage#abc"

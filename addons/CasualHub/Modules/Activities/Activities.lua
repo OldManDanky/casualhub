@@ -158,9 +158,19 @@ function Activities:IsActive(a, now)
     return status == "open" or status == "full"
 end
 
+-- True when an accepted volunteer has since withdrawn. Acceptance lives on the
+-- organizer's record and withdrawal on the volunteer's, so both are checked.
+function Activities:HasWithdrawn(activity, name)
+    local s = CH.Sync:Get(S_TYPE, activity.id .. "|" .. name)
+    return s ~= nil and not s.deleted and s.state == "withdrawn"
+end
+
+-- Accepted volunteers who are still in (withdrawn ones don't hold a slot).
 function Activities:AcceptedCount(a)
     local n = 0
-    for _ in pairs(a.accepted or {}) do n = n + 1 end
+    for name in pairs(a.accepted or {}) do
+        if not self:HasWithdrawn(a, name) then n = n + 1 end
+    end
     return n
 end
 
@@ -192,7 +202,8 @@ function Activities:Volunteers(activity)
     for _, s in CH.Sync:Iterate(S_TYPE) do
         if not s.deleted and s.activityId == activity.id then
             out[#out + 1] = { name = s.owner, role = s.role, note = s.note, state = s.state,
-                accepted = activity.accepted[s.owner] ~= nil }
+                accepted = activity.accepted[s.owner] ~= nil and s.state ~= "withdrawn",
+                withdrewAfterAccept = activity.accepted[s.owner] ~= nil and s.state == "withdrawn" }
         end
     end
     -- Accepted volunteers whose signup we haven't received still count.
@@ -212,7 +223,7 @@ end
 function Activities:ActiveVolunteerCount(activity)
     local n = 0
     for _, v in ipairs(self:Volunteers(activity)) do
-        if v.state == "volunteered" or v.accepted then n = n + 1 end
+        if v.state == "volunteered" or v.accepted then n = n + 1 end  -- withdrawn never counts
     end
     return n
 end
@@ -230,7 +241,9 @@ end
 -- Accepted count per role, for "T 1/2" style summaries.
 function Activities:RoleFill(activity)
     local fill = {}
-    for _, role in pairs(activity.accepted or {}) do fill[role] = (fill[role] or 0) + 1 end
+    for name, role in pairs(activity.accepted or {}) do
+        if not self:HasWithdrawn(activity, name) then fill[role] = (fill[role] or 0) + 1 end
+    end
     return fill
 end
 
@@ -348,7 +361,8 @@ function Activities:Withdraw(activityId)
 end
 
 ---------------------------------------------------------------------------
--- Restrained notifications: someone volunteers for your request; you're accepted.
+-- Restrained notifications: someone volunteers for your request, an accepted
+-- volunteer withdraws, or you're accepted.
 ---------------------------------------------------------------------------
 
 function Activities:OnRecordChanged(typeName, id, record)
@@ -360,6 +374,14 @@ function Activities:OnRecordChanged(typeName, id, record)
         if a and a.owner == me and self:IsActive(a) and not self.notified[key] then
             self.notified[key] = true
             CH:Print(L["%s volunteered (%s) for \"%s\". /chub activities"], record.owner, self:Label(record.role), a.title)
+        end
+        self.notified[id .. "@w"] = nil
+    elseif typeName == S_TYPE and not record.deleted and record.state == "withdrawn" and record.owner ~= me then
+        local a = self:Get(record.activityId)
+        local key = id .. "@w"
+        if a and a.owner == me and a.accepted[record.owner] and self:IsActive(a) and not self.notified[key] then
+            self.notified[key] = true
+            CH:Print(L["%s withdrew from \"%s\". /chub activities"], record.owner, a.title)
         end
     elseif typeName == A_TYPE and not record.deleted and record.owner ~= me and record.accepted and record.accepted[me] then
         local key = id .. "@a"
@@ -373,7 +395,7 @@ end
 ---------------------------------------------------------------------------
 
 CH:RegisterModule(MODULE, {
-    version = "0.3.0",
+    version = "0.3.2",
     description = L["Activity Board: post requests and volunteer"],
     requires = { "C_ChatInfo.SendAddonMessage" },
     initialize = function()

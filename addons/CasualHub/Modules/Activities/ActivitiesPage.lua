@@ -183,13 +183,14 @@ function Page:RenderDetail()
     f.volunteersHeading:Show()
     for i = 1, math.min(#volunteers, MAX_VOLUNTEER_ROWS) do
         local v, row = volunteers[i], f.volunteerRows[i]
-        local state = v.accepted and ("|cff7fd17f" .. A:Label("accepted") .. "|r") or
+        local state = v.withdrewAfterAccept and ("|cffe0a040" .. L["Withdrew"] .. "|r") or
+            v.accepted and ("|cff7fd17f" .. A:Label("accepted") .. "|r") or
             (v.state == "withdrawn" and ("|cff999999" .. A:Label("withdrawn") .. "|r") or A:Label("volunteered"))
         row.text:SetText(("%s  |cff999999%s|r  %s%s"):format(coloredName(v.name), A:Label(v.role), state,
             v.note and ("  |cffbbbbbb\"" .. v.note .. "\"|r") or ""))
         row.volunteer = v
         row.accept:SetShown(mine and not v.accepted and v.state == "volunteered")
-        row.remove:SetShown(mine and v.accepted)
+        row.remove:SetShown(mine and (v.accepted or v.withdrewAfterAccept))
         row.invite:SetShown(mine and v.accepted and CH.Roster:IsOnline(v.name))
         row:Show()
     end
