@@ -7,6 +7,7 @@ the client facts it is built on are in `docs/forever-compat.md`.
 - `tests/run.sh` runs offline smoke tests in Lua 5.1 against a stubbed WoW API (`tests/wow_stub.lua`).
 - `./deploy.sh [AddonName]` syntax-checks the addons and copies them into the Forever AddOns folder.
   Then `/reload` in-game. Adding or removing files needs a full client restart, not just a `/reload`.
+- `tools/release.sh NOTES.md` tags the TOC version, pushes, and publishes a GitHub release with the addon zip.
 - `tools/png2tga.py` converts PNG artwork into the TGA textures WoW loads (e.g. `Media/icon64.tga` from the CasualBot icon).
 
 Formerly "GuildHub" in the design doc; renamed because another addon already uses that name.
