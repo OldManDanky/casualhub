@@ -20,7 +20,8 @@ local DEFAULT_SETTINGS = {
     modules = {},                            -- [moduleName] = false to disable; absent means enabled
     permissions = { rankRoles = {} },        -- [tostring(rankIndex)] = "member" | "officer" | "guildmaster"
     profile = { share = true },              -- profiles are shared by default (opt-out)
-    notifications = { activities = true },   -- chat line when someone volunteers / you're accepted
+    -- Chat lines: someone volunteers / you're accepted; event reminders `eventLead` minutes before the start.
+    notifications = { activities = true, events = true, eventLead = 15 },
 }
 Store.DEFAULT_SETTINGS = DEFAULT_SETTINGS
 

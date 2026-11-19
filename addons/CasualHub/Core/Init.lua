@@ -204,3 +204,26 @@ function CH.SafeCall(label, fn, ...)
     end
     return unpack(results, 1, table.maxn(results))
 end
+
+-- "20:30", "8:30", "20", "8pm", "8:30pm" -> hour, minute
+function CH.ParseClock(text)
+    text = (text or ""):lower():gsub("%s", "")
+    local h, m, ampm = text:match("^(%d%d?):(%d%d)([ap]?m?)$")
+    if not h then
+        h, ampm = text:match("^(%d%d?)([ap]?m?)$")
+        m = "0"
+    end
+    h, m = tonumber(h), tonumber(m)
+    if not h or m > 59 then return nil end
+    if ampm == "pm" or ampm == "p" then
+        if h < 1 or h > 12 then return nil end
+        if h < 12 then h = h + 12 end
+    elseif ampm == "am" or ampm == "a" then
+        if h < 1 or h > 12 then return nil end
+        if h == 12 then h = 0 end
+    elseif ampm ~= "" then
+        return nil
+    end
+    if h > 23 then return nil end
+    return h, m
+end

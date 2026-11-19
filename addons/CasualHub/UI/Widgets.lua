@@ -244,6 +244,37 @@ function W.List(parent, rowHeight, createRow, updateRow)
     return list
 end
 
+-- A row of buttons acting as one choice; row:Set(value) highlights it, row.value holds it.
+function W.ToggleRow(parent, values, labelOf, width, onSelect)
+    local row = { buttons = {}, value = nil }
+    local prev
+    for _, value in ipairs(values) do
+        local b = W.Button(parent, labelOf(value), width, function()
+            row:Set(value)
+            if onSelect then onSelect(value) end
+        end)
+        if prev then b:SetPoint("LEFT", prev, "RIGHT", 4, 0) end
+        row.buttons[value] = b
+        prev = b
+    end
+    function row:Set(value)
+        self.value = value
+        for v, b in pairs(self.buttons) do
+            if v == value then
+                b:LockHighlight()
+                b:GetFontString():SetTextColor(GOLD.r, GOLD.g, GOLD.b)
+            else
+                b:UnlockHighlight()
+                b:GetFontString():SetTextColor(1, 1, 1)
+            end
+        end
+    end
+    function row:Anchor(...)
+        self.buttons[values[1]]:SetPoint(...)
+    end
+    return row
+end
+
 -- A titled panel used for dashboard cards and settings groups.
 function W.Card(parent, title)
     local card = W.CreatePanel(parent, W.COLORS.inset, 0.5)

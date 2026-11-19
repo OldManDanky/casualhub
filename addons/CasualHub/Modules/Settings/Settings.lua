@@ -37,7 +37,7 @@ function SettingsPage:Build(frame)
     local sharing = W.Card(frame, L["Sharing and notifications"])
     sharing:SetPoint("TOPLEFT", appearance, "BOTTOMLEFT", 0, -12)
     sharing:SetPoint("RIGHT", frame, "RIGHT", -20, 0)
-    sharing:SetHeight(64)
+    sharing:SetHeight(92)
     frame.share = W.Checkbox(sharing, L["Share my profile with the guild"],
         L["When off, guildmates' copies of your profile are removed and nothing is sent."],
         function(v) S:Set("profile.share", v) end)
@@ -46,6 +46,16 @@ function SettingsPage:Build(frame)
         L["A chat line when someone volunteers for your request, or you're accepted for one."],
         function(v) S:Set("notifications.activities", v) end)
     frame.notifyActivities:SetPoint("TOPLEFT", 300, -32)
+    frame.notifyEvents = W.Checkbox(sharing, L["Event reminders"],
+        L["A chat line and a sound before events you organize or signed up for (while the game is running)."],
+        function(v) S:Set("notifications.events", v) end)
+    frame.notifyEvents:SetPoint("TOPLEFT", 12, -60)
+    local leads = CH.GuildEvents and CH.GuildEvents.LEAD_MINUTES or { 5, 15, 30, 60 }
+    local leadLabel = W.Label(sharing, L["Remind me"], "GameFontHighlight")
+    leadLabel:SetPoint("TOPLEFT", 300, -64)
+    frame.eventLead = W.ToggleRow(sharing, leads, function(m) return (L["%d min"]):format(m) end, 56,
+        function(m) S:Set("notifications.eventLead", m) end)
+    frame.eventLead:Anchor("LEFT", leadLabel, "RIGHT", 8, 0)
 
     -- Modules ----------------------------------------------------------------
     local modules = W.Card(frame, L["Modules"])
@@ -117,6 +127,8 @@ function SettingsPage:OnShow()
     frame.debug:SetChecked(S:Get("debug"))
     frame.share:SetChecked(S:Get("profile.share") ~= false)
     frame.notifyActivities:SetChecked(S:Get("notifications.activities") ~= false)
+    frame.notifyEvents:SetChecked(S:Get("notifications.events") ~= false)
+    frame.eventLead:Set(S:Get("notifications.eventLead") or 15)
     for _, cb in ipairs(frame.moduleChecks) do
         cb:SetChecked(S:IsModuleEnabled(cb.module.name))
         cb.status:SetText(L[STATE_LABELS[cb.module.state] or cb.module.state])

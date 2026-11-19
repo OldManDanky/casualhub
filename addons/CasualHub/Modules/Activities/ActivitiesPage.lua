@@ -49,39 +49,7 @@ local function statusTag(status)
     return "|c" .. (STATUS_COLORS[status] or "ffffffff") .. A:Label(status) .. "|r"
 end
 
----------------------------------------------------------------------------
--- Toggle button rows (category filter, editor choices)
----------------------------------------------------------------------------
-
-local function toggleRow(parent, values, labelOf, width, onSelect)
-    local row = { buttons = {}, value = nil }
-    local prev
-    for _, value in ipairs(values) do
-        local b = W.Button(parent, labelOf(value), width, function()
-            row:Set(value)
-            if onSelect then onSelect(value) end
-        end)
-        if prev then b:SetPoint("LEFT", prev, "RIGHT", 4, 0) end
-        row.buttons[value] = b
-        prev = b
-    end
-    function row:Set(value)
-        self.value = value
-        for v, b in pairs(self.buttons) do
-            if v == value then
-                b:LockHighlight()
-                b:GetFontString():SetTextColor(GOLD.r, GOLD.g, GOLD.b)
-            else
-                b:UnlockHighlight()
-                b:GetFontString():SetTextColor(1, 1, 1)
-            end
-        end
-    end
-    function row:Anchor(...)
-        self.buttons[values[1]]:SetPoint(...)
-    end
-    return row
-end
+local toggleRow = W.ToggleRow
 
 ---------------------------------------------------------------------------
 -- List
@@ -267,33 +235,12 @@ end
 -- Editor (new / edit)
 ---------------------------------------------------------------------------
 
--- "20:30", "8:30", "20", "8pm", "8:30pm" -> hour, minute
-function Page.ParseClock(text)
-    text = (text or ""):lower():gsub("%s", "")
-    local h, m, ampm = text:match("^(%d%d?):(%d%d)([ap]?m?)$")
-    if not h then
-        h, ampm = text:match("^(%d%d?)([ap]?m?)$")
-        m = "0"
-    end
-    h, m = tonumber(h), tonumber(m)
-    if not h or m > 59 then return nil end
-    if ampm == "pm" or ampm == "p" then
-        if h < 1 or h > 12 then return nil end
-        if h < 12 then h = h + 12 end
-    elseif ampm == "am" or ampm == "a" then
-        if h < 1 or h > 12 then return nil end
-        if h == 12 then h = 0 end
-    elseif ampm ~= "" then
-        return nil
-    end
-    if h > 23 then return nil end
-    return h, m
-end
+Page.ParseClock = CH.ParseClock
 
 -- Local wall-clock time on today/tomorrow -> absolute timestamp.
 function Page.ComputeStart(day, clock, now)
     if day == "now" then return nil end
-    local h, m = Page.ParseClock(clock)
+    local h, m = CH.ParseClock(clock)
     if not h then return false end
     local t = date("*t", now)
     t.hour, t.min, t.sec = h, m, 0

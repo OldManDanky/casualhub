@@ -59,6 +59,31 @@ function Dashboard:Refresh()
         end
         frame.activitiesCard.body:SetText(table.concat(shown, "\n"))
     end
+
+    -- Upcoming events (Events module may be disabled).
+    local E = CH.Modules:IsRunning("Events") and CH.GuildEvents
+    if E then
+        local upcoming, shown = {}, {}
+        for _, e in ipairs(E:List()) do
+            if E:IsActive(e) then upcoming[#upcoming + 1] = e end
+        end
+        local me = CH.Identity:PlayerKey()
+        for i = 1, math.min(3, #upcoming) do
+            local e = upcoming[i]
+            local lineup = E:Lineup(e)
+            local where = E:PlacementOf(e, me, lineup)
+            local mark = E:IsMine(e) and "|cffd4af37*|r " or (where == "lineup" and "|cff7fd17f+|r ")
+                or (where == "waitlist" and "|cffe8c547~|r ") or ""
+            shown[#shown + 1] = ("%s%s |cff999999- %s  %d/%d|r"):format(mark, e.title, CH.EventsPage.FormatStart(e),
+                lineup.size, e.capacity)
+        end
+        if #upcoming == 0 then
+            shown[1] = "|cff999999" .. L["No upcoming events. Schedule one on the Events page."] .. "|r"
+        elseif #upcoming > 3 then
+            shown[#shown + 1] = ("|cff999999" .. L["and %d more"] .. "|r"):format(#upcoming - 3)
+        end
+        frame.eventsCard.body:SetText(table.concat(shown, "\n"))
+    end
 end
 
 local function layout(frame)
@@ -88,8 +113,8 @@ function Dashboard:Build(frame)
     frame.activitiesCard:SetScript("OnMouseUp", function() CH.UI:SelectPage("activities") end)
     frame.eventsCard = card(L["Upcoming Events"], 120)
     frame.eventsCard:SetPoint("TOPLEFT", frame.activitiesCard, "TOPRIGHT", 12, 0)
-    frame.eventsCard.body:SetText("|cff999999" ..
-        L["Event signups arrive in phase 4."] .. "|r")
+    frame.eventsCard:EnableMouse(true)
+    frame.eventsCard:SetScript("OnMouseUp", function() CH.UI:SelectPage("events") end)
 
     frame.cards = { frame.guildCard, frame.motdCard, frame.activitiesCard, frame.eventsCard }
     frame:SetScript("OnSizeChanged", layout)
@@ -116,7 +141,7 @@ CH:RegisterModule(MODULE, {
         CH.Events:RegisterGameEvent("GUILD_MOTD", MODULE, refresh)
         CH.Events:Subscribe("GUILD_CHANGED", MODULE, refresh)
         CH.Events:Subscribe("SYNC_RECORD_CHANGED", MODULE, function(typeName)
-            if typeName == "activity" then refresh() end
+            if typeName == "activity" or typeName == "event" or typeName == "rsvp" then refresh() end
         end)
     end,
     shutdown = function()

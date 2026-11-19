@@ -60,7 +60,7 @@ end
 
 local function reportGlobals()
     -- Optional APIs the code probes on purpose; anything else read-but-undefined is suspicious.
-    local expected = { SettingsPanel = true, C_ClassColor = true, CasualHubDB = true, CasualHubCharDB = true, CasualHubMinimapButton = true }
+    local expected = { SettingsPanel = true, PlaySound = true, SOUNDKIT = true, UnitLevel = true, C_ClassColor = true, CasualHubDB = true, CasualHubCharDB = true, CasualHubMinimapButton = true }
     local unexpected = {}
     for name in pairs(Stub.missingGlobals) do
         if not expected[name] then unexpected[#unexpected + 1] = name end
@@ -109,7 +109,7 @@ scenarios.fresh = function()
         check(CH.UI.currentPage == entry.id and CH.UI.pageFrames[entry.id]:IsShown(), "page " .. entry.id .. " opens")
     end
     check(not CH.UI.pageFrames.dashboard:IsShown(), "previous page hidden")
-    check(CH.UI.navButtons.events.badge:IsShown() and not CH.UI.navButtons.settings.badge:IsShown(),
+    check(CH.UI.navButtons.professions.badge:IsShown() and not CH.UI.navButtons.settings.badge:IsShown(),
         "'soon' badge only on unbuilt sections")
 
     local page = CH.UI.pageFrames.settings
@@ -737,6 +737,218 @@ scenarios.activities_ui = function()
 
     SlashCmdList.CASUALHUB("dashboard")
     check(contains(CH.UI.pageFrames.dashboard.activitiesCard.body:GetText(), "Azuregos"), "dashboard lists open requests")
+    noErrors(CH)
+    reportGlobals()
+end
+
+---------------------------------------------------------------------------
+-- Phase 4: Events and group builder
+---------------------------------------------------------------------------
+
+local function rsvp(CH, eventId, who, role, state, joinedAt, rev)
+    peerSend(CH, "REC", { y = "rsvp", r = { id = eventId .. "|" .. who, owner = who, rev = rev or 1,
+        updatedAt = Stub.serverTime, eventId = eventId, role = role, state = state, joinedAt = joinedAt } }, nil, who)
+end
+
+scenarios.events = function()
+    local CH = boot()
+    local E = CH.GuildEvents
+    drain()
+    local now = Stub.serverTime
+    local base = { category = "dungeon", title = "Deadmines", startAt = now + 2 * 86400, duration = 120,
+        capacity = 3, roles = { tank = 1, healer = 1 }, organizerRole = "dps" }
+    local id, reason = E:Create(base)
+    Stub.advance(30)
+    local recs = sentMessages(CH, "REC")
+    check(id and id:find("^Ghazneth Strongbow#") and #recs == 1 and recs[1].b.y == "event" and recs[1].b.r.title == "Deadmines",
+        "scheduling an event broadcasts it " .. tostring(reason or ""))
+    local function bad(over)
+        local f = copy(base)
+        for k, v in pairs(over) do f[k] = v end
+        return E:Create(f) == nil
+    end
+    check(bad({ category = "raids" }), "rejects unknown category")
+    check(bad({ title = " " }), "rejects empty title")
+    check(bad({ capacity = 41 }), "rejects groups over 40")
+    check(bad({ startAt = now + 90 * 86400 }), "rejects events more than 60 days out")
+    check(bad({ duration = 5 }), "rejects too-short duration")
+
+    local e = E:Get(id)
+    local lu = E:Lineup(e)
+    check(lu.size == 1 and lu.slots.dps[1].organizer, "organizer takes their own slot")
+    check(E:EffectiveStatus(e) == "upcoming", "upcoming before the start")
+
+    -- Signups fill role slots in signup order; the rest wait.
+    rsvp(CH, id, "Thrall Stormrage", "tank", "going", now - 300)
+    rsvp(CH, id, "Ghazneth Ironhide", "tank", "going", now - 200)
+    rsvp(CH, id, "Jaina Proudmoore", "healer", "tentative", now - 100)
+    e = E:Get(id)
+    lu = E:Lineup(e)
+    check(#lu.slots.tank == 1 and lu.slots.tank[1].name == "Thrall Stormrage", "first tank gets the slot")
+    check(#lu.waitlist == 1 and lu.waitlist[1].name == "Ghazneth Ironhide", "second tank waits (slot full)")
+    check(#lu.tentative == 1 and lu.size == 2, "tentative signups don't take a slot")
+    check(E:PlacementOf(e, "Ghazneth Ironhide", lu) == "waitlist", "placement reports the waitlist")
+
+    -- The organizer confirms a waiting player past the slot count, and benches another.
+    check(E:SetLineup(id, "Ghazneth Ironhide", "tank"), "organizer confirms from the waitlist")
+    lu = E:Lineup(E:Get(id))
+    check(#lu.slots.tank == 1 and lu.slots.tank[1].name == "Ghazneth Ironhide" and lu.slots.tank[1].confirmed
+        and lu.waitlist[1].name == "Thrall Stormrage", "confirmed players come first; the size cap then pushes others out")
+    E:SetLineup(id, "Ghazneth Ironhide", "bench")
+    lu = E:Lineup(E:Get(id))
+    check(lu.slots.tank[1].name == "Thrall Stormrage" and lu.waitlist[1].benched, "benched player waits")
+    E:SetLineup(id, "Ghazneth Ironhide", nil)
+
+    -- Peers can't touch the organizer's record or sign up someone else.
+    local foreign = copy(E:Get(id))
+    foreign.owner, foreign.rev, foreign.title = "Thrall Stormrage", 99, "hijacked"
+    peerSend(CH, "REC", { y = "event", r = foreign })
+    check(E:Get(id).title == "Deadmines", "event record can't be rewritten by another owner")
+    peerSend(CH, "REC", { y = "rsvp", r = { id = id .. "|Jaina Proudmoore", owner = "Thrall Stormrage", rev = 5,
+        updatedAt = now, eventId = id, role = "dps", state = "going", joinedAt = now } })
+    check(#E:Lineup(E:Get(id)).tentative == 1, "rsvp id must match its owner")
+    peerSend(CH, "REC", { y = "rsvp", r = { id = id .. "|Thrall Stormrage", owner = "Thrall Stormrage", rev = 7,
+        updatedAt = now, eventId = id, role = "tank", state = "going", joinedAt = now + 999 } })
+    check(E:Lineup(E:Get(id)).slots.tank[1].name == "Thrall Stormrage", "rejects a signup time in the future")
+
+    -- Official flag: only from officers.
+    peerSend(CH, "REC", { y = "event", r = { id = "Ghazneth Ironhide#aa1", owner = "Ghazneth Ironhide", rev = 1,
+        updatedAt = now, category = "raid", title = "Not official", status = "scheduled", startAt = now + 86400,
+        duration = 180, capacity = 10, official = true } }, nil, "Ghazneth Ironhide")
+    peerSend(CH, "REC", { y = "event", r = { id = "Thrall Stormrage#aa2", owner = "Thrall Stormrage", rev = 1,
+        updatedAt = now, category = "raid", title = "Onyxia", status = "scheduled", startAt = now + 3 * 86400,
+        duration = 180, capacity = 10, official = true } })
+    check(E:Get("Ghazneth Ironhide#aa1") and not E:Get("Ghazneth Ironhide#aa1").official, "member's official flag dropped")
+    check(E:Get("Thrall Stormrage#aa2").official, "officer's official flag kept")
+
+    -- Attending someone else's event; changing role keeps your place.
+    local tid = "Thrall Stormrage#aa2"
+    drain()
+    check(E:Respond(tid, "going", "healer"), "sign up for a guildmate's event")
+    local mine = E:MyRsvp(tid)
+    local joined = mine.joinedAt
+    Stub.advance(60)
+    E:Respond(tid, "going", "dps")
+    mine = E:MyRsvp(tid)
+    check(mine.role == "dps" and mine.joinedAt == joined, "changing role keeps the signup time")
+    E:Respond(tid, "declined")
+    E:Respond(tid, "going", "dps")
+    check(E:MyRsvp(tid).joinedAt > joined, "dropping out and back in goes to the end")
+    check(not E:Respond(id, "going", "dps"), "organizer can't sign up for their own event")
+    recs = sentMessages(CH, "REC")
+    check(#recs >= 1 and recs[#recs].b.y == "rsvp", "signups broadcast")
+
+    -- Reminders: once before the start, once at the start, only for events you're in.
+    E:SetStatus("Ghazneth Strongbow#none", "cancelled")  -- no-op on a missing event
+    Stub.printed = {}
+    Stub.advance(3 * 86400 - 14 * 60 - 120)
+    E:CheckReminders()
+    check(printedContains("Reminder: \"Onyxia\" starts in"), "reminder before an event you're in")
+    local count = #Stub.printed
+    E:CheckReminders()
+    check(#Stub.printed == count, "reminder shown once")
+    check(not printedContains("Not official"), "no reminder for events you're not in")
+    Stub.advance(16 * 60)
+    E:CheckReminders()
+    check(printedContains("\"Onyxia\" is starting now"), "reminder at the start")
+    check(E:EffectiveStatus(E:Get(tid)) == "inprogress", "in progress after the start")
+
+    -- Cancellation notice for attendees.
+    local cancelled = copy(E:Get(tid))
+    cancelled.status, cancelled.rev, cancelled.updatedAt = "cancelled", cancelled.rev + 1, Stub.serverTime
+    peerSend(CH, "REC", { y = "event", r = cancelled })
+    check(printedContains("Thrall Stormrage cancelled \"Onyxia\""), "attendees told about a cancellation")
+
+    -- Pruning a week after the end.
+    Stub.advance(9 * 86400)
+    CH.Sync:Prune()
+    check(E:Get(tid) == nil and CH.Sync:Get("rsvp", tid .. "|Ghazneth Strongbow") == nil,
+        "old events and their signups pruned")
+    local doomed = E:Create({ category = "social", title = "Delete me", startAt = Stub.serverTime + 3600,
+        duration = 60, capacity = 5 })
+    check(doomed and E:Delete(doomed) and E:Get(doomed) == nil and CH.Sync:Get("event", doomed).deleted,
+        "organizer deletes (tombstone kept)")
+    noErrors(CH)
+    reportGlobals()
+end
+
+scenarios.events_ui = function()
+    local CH = boot()
+    local E, P = CH.GuildEvents, CH.EventsPage
+    local now = Stub.serverTime
+    check(P.DayOffset(now + 86400, now) == 1 and P.DayOffset(now, now) == 0, "day offsets")
+    local start = P.ComputeStart(2, "20:30", now)
+    check(date("%H:%M", start) == "20:30" and P.DayOffset(start, now) == 2, "start from day offset and clock")
+    check(P.ComputeStart(0, "nope", now) == nil, "bad clock rejected")
+
+    SlashCmdList.CASUALHUB("events")
+    local page = CH.UI.pageFrames.events
+    check(page and page:IsShown() and page.empty:IsShown() and not CH.UI.navButtons.events.badge:IsShown(),
+        "/chub events opens an empty page, no longer marked 'soon'")
+    P:OpenEditor(nil)
+    local ed = page.editor
+    check(ed:IsShown() and ed.official:IsShown(), "editor opens; officers (GM here) see the Official box")
+    ed.title:SetText("Scarlet Monastery")
+    ed.clock:SetText("21:00")
+    ed.capacity:SetText("5")
+    ed.roleBoxes.tank:SetText("1")
+    ed.organizerRole.buttons.healer:RunScript("OnClick")
+    ed.official:SetChecked(true)
+    P:SaveEditor()
+    local list = E:List()
+    local e = list[1]
+    check(not ed:IsShown() and e and e.title == "Scarlet Monastery" and e.organizerRole == "healer" and e.official
+        and e.roles.tank == 1 and P.DayOffset(e.startAt, now) == 1 and date("%H:%M", e.startAt) == "21:00",
+        "editor schedules the event (tomorrow 21:00 by default)")
+    check(#page.list.items == 1 and contains(page.detailBody:GetText(), "Official"), "listed and shown")
+    check(page.actionButtons[1]:GetText() == "Edit" and page.actionButtons[2]:GetText() == "Repeat +7d",
+        "organizer actions")
+
+    -- Repeat: a new event a week later.
+    page.actionButtons[2]:RunScript("OnClick")
+    check(ed:IsShown() and ed.title:GetText() == "Scarlet Monastery" and ed.dayOffset == 8, "repeat prefills a week later")
+    P:SaveEditor()
+    check(#E:List() == 2, "repeat creates a second event")
+
+    -- Suggestions from shared profiles.
+    peerSend(CH, "REC", { y = "profile", r = { id = "Ghazneth Ironhide", owner = "Ghazneth Ironhide", rev = 1,
+        updatedAt = now, roles = { "tank" }, days = { ({ "sun", "mon", "tue", "wed", "thu", "fri", "sat" })[date("*t", e.startAt).wday] },
+        times = { "evening" } } }, nil, "Ghazneth Ironhide")
+    peerSend(CH, "REC", { y = "profile", r = { id = "Jaina Proudmoore", owner = "Jaina Proudmoore", rev = 1,
+        updatedAt = now, roles = { "dps" } } }, nil, "Jaina Proudmoore")
+    local sugg = E:Suggestions(E:Get(e.id))
+    check(#sugg == 2 and sugg[1].name == "Ghazneth Ironhide" and sugg[1].dayMatch and sugg[1].timeMatch,
+        "suggestions ranked by availability fit")
+    P:Select(e.id)
+    page.actionButtons[3]:RunScript("OnClick")
+    check(P.view == "suggestions" and page.lineup.items[2].suggestion, "Suggestions view in the detail panel")
+    rsvp(CH, e.id, "Ghazneth Ironhide", "tank", "going", now)
+    check(#E:Suggestions(E:Get(e.id)) == 1, "signed-up members drop out of suggestions")
+    page.actionButtons[3]:RunScript("OnClick")
+    local found
+    for _, item in ipairs(page.lineup.items) do if item.entry and item.entry.name == "Ghazneth Ironhide" then found = item end end
+    check(P.view == "lineup" and found and found.section == "lineup", "lineup shows the new tank")
+
+    -- Attendee view of a guildmate's event.
+    peerSend(CH, "REC", { y = "event", r = { id = "Thrall Stormrage#zz1", owner = "Thrall Stormrage", rev = 1,
+        updatedAt = now, category = "raid", title = "Molten Core", status = "scheduled", startAt = now + 4 * 86400,
+        duration = 240, capacity = 40, roles = { tank = 4, healer = 8 } } })
+    P:Select("Thrall Stormrage#zz1")
+    check(page.actionButtons[1]:GetText() == "Go: Tank" and page.actionButtons[5]:GetText() == "Can't go",
+        "signup buttons per role")
+    page.actionButtons[2]:RunScript("OnClick")
+    local r = E:MyRsvp("Thrall Stormrage#zz1")
+    check(r and r.role == "healer" and r.state == "going" and contains(page.detailBody:GetText(), "In (Healer)"),
+        "signing up shows your placement")
+
+    SlashCmdList.CASUALHUB("dashboard")
+    local dash = CH.UI.pageFrames.dashboard.eventsCard.body:GetText()
+    check(contains(dash, "Scarlet Monastery") and contains(dash, "Molten Core"), "dashboard lists upcoming events")
+    SlashCmdList.CASUALHUB("settings")
+    local settings = CH.UI.pageFrames.settings
+    check(settings.notifyEvents:GetChecked() and settings.eventLead.value == 15, "reminder settings shown")
+    settings.eventLead.buttons[30]:RunScript("OnClick")
+    check(CH.Settings:Get("notifications.eventLead") == 30, "reminder lead saved")
     noErrors(CH)
     reportGlobals()
 end
