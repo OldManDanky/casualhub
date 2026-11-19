@@ -18,6 +18,59 @@ function CH:Print(msg, ...)
 end
 
 ---------------------------------------------------------------------------
+-- Text helpers
+---------------------------------------------------------------------------
+
+-- Cleans user or network text for display and storage: strips UI escape sequences ("|"), control characters
+-- and surrounding/duplicate whitespace, then truncates to maxBytes without splitting a UTF-8 character.
+function CH.CleanText(text, maxBytes)
+    if type(text) ~= "string" then return nil end
+    text = text:gsub("|", ""):gsub("[%c]", " "):gsub("%s+", " ")
+    text = text:gsub("^ ", ""):gsub(" $", "")
+    if maxBytes and #text > maxBytes then
+        text = text:sub(1, maxBytes)
+        -- Drop a trailing partial UTF-8 sequence.
+        local i = #text
+        while i > 0 and text:byte(i) >= 0x80 and text:byte(i) < 0xC0 do i = i - 1 end
+        if i > 0 and text:byte(i) >= 0xC0 then
+            local lead = text:byte(i)
+            local need = lead >= 0xF0 and 4 or (lead >= 0xE0 and 3 or 2)
+            if #text - i + 1 < need then text = text:sub(1, i - 1) end
+        end
+    end
+    return text
+end
+
+-- "just now", "5m ago", "3h ago", "2d ago" for a past timestamp (seconds).
+function CH.FormatAgo(timestamp, now)
+    if type(timestamp) ~= "number" then return CH.L["unknown"] end
+    local delta = math.max(0, (now or time()) - timestamp)
+    if delta < 60 then return CH.L["just now"] end
+    if delta < 3600 then return (CH.L["%dm ago"]):format(math.floor(delta / 60)) end
+    if delta < 86400 then return (CH.L["%dh ago"]):format(math.floor(delta / 3600)) end
+    return (CH.L["%dd ago"]):format(math.floor(delta / 86400))
+end
+
+-- Hex color ("ffrrggbb") for a class file name such as "HUNTER"; white when unknown.
+-- Forever does not define RAID_CLASS_COLORS for every class, so both sources are optional.
+function CH.ClassColorHex(classFile)
+    local c
+    if type(classFile) == "string" then
+        if C_ClassColor and C_ClassColor.GetClassColor then
+            local ok, color = pcall(C_ClassColor.GetClassColor, classFile)
+            if ok then c = color end
+        end
+        if not c and RAID_CLASS_COLORS then c = RAID_CLASS_COLORS[classFile] end
+    end
+    if not c or type(c.r) ~= "number" then return "ffffffff" end
+    return ("ff%02x%02x%02x"):format(math.floor(c.r * 255 + 0.5), math.floor(c.g * 255 + 0.5), math.floor(c.b * 255 + 0.5))
+end
+
+function CH.ServerTime()
+    return (GetServerTime and GetServerTime()) or time()
+end
+
+---------------------------------------------------------------------------
 -- Compatibility
 ---------------------------------------------------------------------------
 

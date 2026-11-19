@@ -17,25 +17,35 @@ function SettingsPage:Build(frame)
     local appearance = W.Card(frame, L["Window"])
     appearance:SetPoint("TOPLEFT", 20, y)
     appearance:SetPoint("RIGHT", frame, "RIGHT", -20, 0)
-    appearance:SetHeight(150)
+    appearance:SetHeight(140)
 
     local scale = W.Slider(appearance, L["Window scale"], 0.6, 1.5, 0.05, formatScale, function(v) S:Set("scale", v) end)
     scale:SetPoint("TOPLEFT", 14, -34)
     frame.scale = scale
 
     frame.lock = W.Checkbox(appearance, L["Lock window position and size"], nil, function(v) S:Set("lockWindow", v) end)
-    frame.lock:SetPoint("TOPLEFT", 12, -84)
+    frame.lock:SetPoint("TOPLEFT", 12, -82)
     frame.minimap = W.Checkbox(appearance, L["Show minimap button"],
         L["Casual Hub is also in the addon menu (the button under the minimap) whether or not this is on."],
         function(v) S:Set("minimap.show", v) end)
-    frame.minimap:SetPoint("TOPLEFT", 12, -110)
+    frame.minimap:SetPoint("TOPLEFT", 12, -106)
 
     local reset = W.Button(appearance, L["Reset position"], 130, function() CH.UI:ResetPosition() end)
     reset:SetPoint("TOPRIGHT", -14, -34)
 
+    -- Sharing ----------------------------------------------------------------
+    local sharing = W.Card(frame, L["Profile sharing"])
+    sharing:SetPoint("TOPLEFT", appearance, "BOTTOMLEFT", 0, -12)
+    sharing:SetPoint("RIGHT", frame, "RIGHT", -20, 0)
+    sharing:SetHeight(64)
+    frame.share = W.Checkbox(sharing, L["Share my profile with the guild"],
+        L["When off, guildmates' copies of your profile are removed and nothing is sent."],
+        function(v) S:Set("profile.share", v) end)
+    frame.share:SetPoint("TOPLEFT", 12, -32)
+
     -- Modules ----------------------------------------------------------------
     local modules = W.Card(frame, L["Modules"])
-    modules:SetPoint("TOPLEFT", appearance, "BOTTOMLEFT", 0, -12)
+    modules:SetPoint("TOPLEFT", sharing, "BOTTOMLEFT", 0, -12)
     modules:SetPoint("RIGHT", frame, "RIGHT", -20, 0)
     modules.body:SetText("|cff999999" .. L["Turn sections on or off. Changes apply after a UI reload."] .. "|r")
     frame.moduleChecks = {}
@@ -47,7 +57,8 @@ function SettingsPage:Build(frame)
                 CH.Settings:SetModuleEnabled(m.name, v)
                 SettingsPage:RefreshReloadHint()
             end)
-            cb:SetPoint("TOPLEFT", 12, -50 - (row - 1) * 26)
+            -- Two columns keep the page within the default window height.
+            cb:SetPoint("TOPLEFT", 12 + ((row - 1) % 2) * 260, -50 - math.floor((row - 1) / 2) * 26)
             local status = W.Label(modules, "", "GameFontHighlightSmall", W.COLORS.muted)
             status:SetPoint("LEFT", cb.label, "RIGHT", 10, 0)
             cb.status = status
@@ -55,7 +66,7 @@ function SettingsPage:Build(frame)
             frame.moduleChecks[#frame.moduleChecks + 1] = cb
         end
     end
-    modules:SetHeight(64 + math.max(row, 1) * 26)
+    modules:SetHeight(64 + math.max(math.ceil(row / 2), 1) * 26)
     frame.reloadButton = W.Button(modules, L["Reload UI"], 110, function() ReloadUI() end)
     frame.reloadButton:SetPoint("TOPRIGHT", -14, -10)
 
@@ -100,6 +111,7 @@ function SettingsPage:OnShow()
     frame.lock:SetChecked(S:Get("lockWindow"))
     frame.minimap:SetChecked(S:Get("minimap.show"))
     frame.debug:SetChecked(S:Get("debug"))
+    frame.share:SetChecked(S:Get("profile.share") ~= false)
     for _, cb in ipairs(frame.moduleChecks) do
         cb:SetChecked(S:IsModuleEnabled(cb.module.name))
         cb.status:SetText(L[STATE_LABELS[cb.module.state] or cb.module.state])

@@ -19,6 +19,7 @@ local DEFAULT_SETTINGS = {
     minimap = { show = true, angle = 205 },
     modules = {},                            -- [moduleName] = false to disable; absent means enabled
     permissions = { rankRoles = {} },        -- [tostring(rankIndex)] = "member" | "officer" | "guildmaster"
+    profile = { share = true },              -- profiles are shared by default (opt-out)
 }
 Store.DEFAULT_SETTINGS = DEFAULT_SETTINGS
 

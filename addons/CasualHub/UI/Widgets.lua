@@ -152,6 +152,98 @@ function W.Slider(parent, text, minValue, maxValue, step, formatValue, onCommit)
     return holder
 end
 
+function W.EditBox(parent, width, maxLetters, onChange)
+    local e = CreateFrame("EditBox", nil, parent, "InputBoxTemplate")
+    e:SetSize(width or 160, 22)
+    e:SetAutoFocus(false)
+    if maxLetters then e:SetMaxLetters(maxLetters) end
+    e:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    e:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
+    if onChange then
+        e:SetScript("OnTextChanged", function(self, userInput)
+            if userInput then CH.SafeCall("edit box", onChange, self:GetText()) end
+        end)
+    end
+    return e
+end
+
+-- Virtual list: only visible rows exist; mouse wheel and a slim scrollbar move the window over `items`.
+-- createRow(parent) -> row frame; updateRow(row, item, index).
+function W.List(parent, rowHeight, createRow, updateRow)
+    local list = CreateFrame("Frame", nil, parent)
+    list.rows, list.items, list.offset = {}, {}, 0
+    list:EnableMouseWheel(true)
+
+    local bar = CreateFrame("Slider", nil, list, BACKDROP_TEMPLATE)
+    bar:SetOrientation("VERTICAL")
+    bar:SetWidth(10)
+    bar:SetPoint("TOPRIGHT", 0, -2)
+    bar:SetPoint("BOTTOMRIGHT", 0, 2)
+    if bar.SetBackdrop then
+        bar:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8" })
+        bar:SetBackdropColor(1, 1, 1, 0.05)
+    end
+    bar:SetThumbTexture("Interface\\Buttons\\WHITE8X8")
+    local thumb = bar:GetThumbTexture()
+    if thumb then
+        thumb:SetVertexColor(GOLD.r, GOLD.g, GOLD.b, 0.6)
+        thumb:SetSize(10, 40)
+    end
+    bar:SetValueStep(1)
+    bar:SetMinMaxValues(0, 0)
+    list.bar = bar
+
+    function list:VisibleRows()
+        return math.max(1, math.floor((self:GetHeight() or 0) / rowHeight))
+    end
+
+    function list:Refresh()
+        local visible = self:VisibleRows()
+        local maxOffset = math.max(0, #self.items - visible)
+        self.offset = math.max(0, math.min(self.offset, maxOffset))
+        for i = 1, visible do
+            local row = self.rows[i]
+            if not row then
+                row = createRow(self)
+                row:SetHeight(rowHeight)
+                row:SetPoint("TOPLEFT", 0, -(i - 1) * rowHeight)
+                row:SetPoint("RIGHT", bar, "LEFT", -4, 0)
+                self.rows[i] = row
+            end
+            local item = self.items[self.offset + i]
+            if item then
+                updateRow(row, item, self.offset + i)
+                row:Show()
+            else
+                row:Hide()
+            end
+        end
+        for i = visible + 1, #self.rows do self.rows[i]:Hide() end
+        self.updating = true
+        bar:SetMinMaxValues(0, maxOffset)
+        bar:SetValue(self.offset)
+        self.updating = false
+        bar:SetShown(maxOffset > 0)
+    end
+
+    function list:SetItems(items)
+        self.items = items or {}
+        self:Refresh()
+    end
+
+    list:SetScript("OnMouseWheel", function(self, delta)
+        self.offset = self.offset - delta * 3
+        self:Refresh()
+    end)
+    bar:SetScript("OnValueChanged", function(_, value)
+        if list.updating then return end
+        list.offset = math.floor(value + 0.5)
+        list:Refresh()
+    end)
+    list:SetScript("OnSizeChanged", function(self) self:Refresh() end)
+    return list
+end
+
 -- A titled panel used for dashboard cards and settings groups.
 function W.Card(parent, title)
     local card = W.CreatePanel(parent, W.COLORS.inset, 0.5)

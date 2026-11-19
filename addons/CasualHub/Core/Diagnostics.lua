@@ -28,6 +28,24 @@ function Diagnostics:BuildReport()
     end
     line(out, "")
 
+    local function counters(t)
+        local keys, parts = {}, {}
+        for k in pairs(t) do keys[#keys + 1] = k end
+        table.sort(keys)
+        for _, k in ipairs(keys) do parts[#parts + 1] = k .. "=" .. tostring(t[k]) end
+        return table.concat(parts, " ")
+    end
+    line(out, "Comm: %s, queue %d", CH.Comm.enabled and "enabled" or "DISABLED", #CH.Comm.queue)
+    line(out, "  %s", counters(CH.Comm.stats))
+    line(out, "Sync: %s", counters(CH.Sync.stats))
+    line(out, "Roster: %s, %d members, %d online", CH.Roster.loaded and "loaded" or "not loaded",
+        CH.Roster.total or 0, CH.Roster.onlineCount or 0)
+    local peers = {}
+    for name, peer in pairs(CH.Comm.peers) do peers[#peers + 1] = name .. " (" .. tostring(peer.version) .. ")" end
+    table.sort(peers)
+    line(out, "Peers seen: %s", #peers == 0 and "none" or table.concat(peers, ", "))
+    line(out, "")
+
     local missing = C.MissingCapabilities()
     line(out, "Missing capabilities: %s", #missing == 0 and "none" or "")
     for _, cap in ipairs(missing) do line(out, "  %s (%s)", cap.path, cap.feature) end

@@ -7,9 +7,8 @@ local Dashboard = {}
 local MODULE = "Dashboard"
 
 local function onlineCounts()
-    if not (IsInGuild and IsInGuild()) or not GetNumGuildMembers then return nil end
-    local total, online = GetNumGuildMembers()
-    return tonumber(online), tonumber(total)
+    if not CH.Roster.loaded then return nil end
+    return CH.Roster.onlineCount, CH.Roster.total
 end
 
 function Dashboard:Refresh()
@@ -26,6 +25,7 @@ function Dashboard:Refresh()
             CH.Permissions:RoleLabel(CH.Permissions:PlayerRole()))
         if online and total then
             lines[#lines + 1] = (L["Online: |cffffffff%d|r of %d members"]):format(online, total)
+            lines[#lines + 1] = (L["Using Casual Hub now: |cffffffff%d|r"]):format(CH.Comm:PeerCount(true) + 1)
         else
             lines[#lines + 1] = L["Loading roster..."]
         end
@@ -78,9 +78,8 @@ end
 
 function Dashboard:OnShow()
     -- The client throttles roster requests; GUILD_ROSTER_UPDATE may not follow, so refresh from cache now too.
-    if IsInGuild and IsInGuild() and C_GuildInfo and C_GuildInfo.GuildRoster then
-        pcall(C_GuildInfo.GuildRoster)
-    end
+    CH.Roster:Request()
+    CH.Roster:Scan()
     self:Refresh()
 end
 
@@ -93,12 +92,11 @@ CH:RegisterModule(MODULE, {
             onShow = function() Dashboard:OnShow() end,
         })
         local refresh = function() Dashboard:Refresh() end
-        CH.Events:RegisterGameEvent("GUILD_ROSTER_UPDATE", MODULE, refresh)
+        CH.Events:Subscribe("ROSTER_UPDATED", MODULE, refresh)
         CH.Events:RegisterGameEvent("GUILD_MOTD", MODULE, refresh)
         CH.Events:Subscribe("GUILD_CHANGED", MODULE, refresh)
     end,
     shutdown = function()
-        CH.Events:UnregisterGameEvent("GUILD_ROSTER_UPDATE", MODULE)
         CH.Events:UnregisterGameEvent("GUILD_MOTD", MODULE)
     end,
 })

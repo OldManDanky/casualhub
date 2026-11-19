@@ -21,6 +21,10 @@ Events:RegisterGameEvent("PLAYER_LOGIN", "Core", function()
         CH:Print(L["saved data could not be loaded; Casual Hub is disabled this session. Type /chub diag."])
         return
     end
+    -- Core services first: modules register sync types and handlers against them.
+    CH.SafeCall("roster init", CH.Roster.Init, CH.Roster)
+    CH.SafeCall("comm init", CH.Comm.Init, CH.Comm)
+    CH.SafeCall("sync init", CH.Sync.Init, CH.Sync)
     CH.Modules:InitializeAll()
     CH.SafeCall("launcher init", CH.Launcher.Init, CH.Launcher)
     CH.ready = true

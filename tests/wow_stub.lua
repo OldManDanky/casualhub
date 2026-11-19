@@ -1,7 +1,8 @@
 -- Minimal WoW Forever API stand-in for offline smoke tests (Lua 5.1).
 -- Frames are permissive mocks: unknown CamelCase methods are no-ops, lowercase fields behave like a table.
 -- Facts mirrored from docs/forever-compat.md: project 18, interface 16001, "First Last" names, etc.
-local Stub = { missingGlobals = {}, frames = {}, eventFrames = {}, printed = {}, timers = {} }
+local Stub = { missingGlobals = {}, frames = {}, eventFrames = {}, printed = {}, timers = {}, tickers = {},
+    sent = {}, sendResults = {}, chatFilters = {}, now = 1000, serverTime = 1795100000 }
 
 local KNOWN_EVENTS = {}
 for _, e in ipairs({ "ADDON_LOADED", "PLAYER_LOGIN", "PLAYER_LOGOUT", "PLAYER_ENTERING_WORLD", "CHAT_MSG_ADDON",
@@ -128,11 +129,33 @@ function Stub.fire(event, ...)
     for _, f in ipairs(list) do f:RunScript("OnEvent", event, ...) end
 end
 
-function Stub.runTimers()
-    local pending = Stub.timers
-    Stub.timers = {}
-    for _, fn in ipairs(pending) do fn() end
+-- Advances the fake clock, running due C_Timer callbacks and tickers in time order.
+function Stub.advance(seconds)
+    local target = Stub.now + (seconds or 0)
+    while true do
+        local nextAt, kind, index
+        for i, t in ipairs(Stub.timers) do
+            if t.at <= target and (not nextAt or t.at < nextAt) then nextAt, kind, index = t.at, "timer", i end
+        end
+        for i, t in ipairs(Stub.tickers) do
+            if not t.cancelled and t.at <= target and (not nextAt or t.at < nextAt) then nextAt, kind, index = t.at, "ticker", i end
+        end
+        if not nextAt then break end
+        Stub.serverTime = Stub.serverTime + (nextAt - Stub.now)
+        Stub.now = nextAt
+        if kind == "timer" then
+            local t = table.remove(Stub.timers, index)
+            t.fn()
+        else
+            local t = Stub.tickers[index]
+            t.at = t.at + t.interval
+            t.fn(t)
+        end
+    end
+    Stub.serverTime = Stub.serverTime + (target - Stub.now)
+    Stub.now = target
 end
+Stub.runTimers = function() Stub.advance(0) end
 
 -- Install globals. `env` overrides per scenario (e.g. not in a guild).
 function Stub.install(env)
@@ -174,16 +197,45 @@ function Stub.install(env)
     G.WOW_PROJECT_CLASSIC = 2
     G.GetBuildInfo = function() return "1.60.1", "70959", "Nov 13 2026", 16001 end
     G.GetLocale = function() return "enUS" end
-    G.GetTime = function() return 1000 end
-    G.time = os.time
+    G.GetTime = function() return Stub.now end
+    G.GetServerTime = function() return Stub.serverTime end
+    G.time = function() return Stub.serverTime end
     G.date = os.date
-    G.C_AddOns = { GetAddOnMetadata = function(_, field) return field == "Version" and "0.1.0-alpha" or nil end }
+    G.C_AddOns = { GetAddOnMetadata = function(addon, field)
+        if field ~= "Version" then return nil end
+        local f = io.open("addons/" .. addon .. "/" .. addon .. ".toc")
+        if not f then return nil end
+        local version = f:read("*a"):match("## Version: ([^\r\n]+)")
+        f:close()
+        return version
+    end }
     G.C_Timer = {
-        After = function(_, fn) Stub.timers[#Stub.timers + 1] = fn end,
-        NewTicker = function() return { Cancel = noop } end,
+        After = function(delay, fn) Stub.timers[#Stub.timers + 1] = { at = Stub.now + delay, fn = fn } end,
+        NewTicker = function(interval, fn)
+            local t = { at = Stub.now + interval, interval = interval, fn = fn }
+            t.Cancel = function() t.cancelled = true end
+            Stub.tickers[#Stub.tickers + 1] = t
+            return t
+        end,
     }
     G.C_EncodingUtil = { SerializeCBOR = noop, DeserializeCBOR = noop }
-    G.C_ChatInfo = { SendAddonMessage = function() return 0 end, RegisterAddonMessagePrefix = function() return 0 end }
+    G.Enum = { SendAddonMessageResult = { Success = 0, InvalidPrefix = 1, InvalidMessage = 2, AddonMessageThrottle = 3,
+        InvalidChatType = 4, NotInGroup = 5, TargetRequired = 6, InvalidChannel = 7, ChannelThrottle = 8, GeneralError = 9 } }
+    G.C_ChatInfo = {
+        RegisterAddonMessagePrefix = function(prefix) Stub.prefix = prefix return 0 end,
+        SendAddonMessage = function(prefix, text, channel, target)
+            assert(#text <= 255, "addon message over 255 bytes: " .. #text)
+            local result = table.remove(Stub.sendResults, 1) or 0
+            if result == 0 then
+                Stub.sent[#Stub.sent + 1] = { prefix = prefix, text = text, channel = channel, target = target }
+            end
+            return result
+        end,
+        InChatMessagingLockdown = function() return Stub.lockdown == true end,
+    }
+    G.ERR_CHAT_PLAYER_NOT_FOUND_S = "No player named '%s' is currently playing."
+    G.ChatFrame_AddMessageEventFilter = function(event, fn) Stub.chatFilters[#Stub.chatFilters + 1] = { event, fn } end
+    G.RAID_CLASS_COLORS = { HUNTER = { r = 0.67, g = 0.83, b = 0.45 }, WARRIOR = { r = 0.78, g = 0.61, b = 0.43 } }
     G.Settings = {
         RegisterCanvasLayoutCategory = function(_, name) return { name = name, GetID = function() return 1 end } end,
         RegisterAddOnCategory = function(cat) Stub.settingsCategory = cat end,
@@ -201,8 +253,30 @@ function Stub.install(env)
         if not inGuild or unit ~= "player" then return nil end
         return "Da Filthy Casuals", "Guild Master", 0, "CAMWOWUS2Realm7PvE"
     end
-    G.GetNumGuildMembers = function() if inGuild then return 55, 5, 5 end return 0, 0, 0 end
-    G.GetGuildRosterInfo = function() end
+    -- name, rank, rankIndex, level, class, zone, online, classFile, lastOnline {y,m,d,h}
+    Stub.roster = env.roster or {
+        { "Ghazneth Strongbow", "Guild Master", 0, 29, "Hunter", "Thousand Needles", true, "HUNTER" },
+        { "Thrall Stormrage", "Officer", 1, 60, "Warrior", "Orgrimmar", true, "WARRIOR" },
+        { "Ghazneth Ironhide", "Member", 3, 41, "Hunter", "Tanaris", true, "HUNTER" },
+        { "Jaina Proudmoore", "Veteran", 2, 58, "Mage", nil, false, "MAGE", { 0, 0, 3, 2 } },
+    }
+    G.GetNumGuildMembers = function()
+        if not inGuild then return 0, 0, 0 end
+        local online = 0
+        for _, r in ipairs(Stub.roster) do if r[7] then online = online + 1 end end
+        return #Stub.roster, online, online
+    end
+    G.GetGuildRosterInfo = function(i)
+        local r = inGuild and Stub.roster[i]
+        if not r then return nil end
+        return r[1], r[2], r[3], r[4], r[5], r[6], "", "", r[7], 0, r[8], 0, 0, false, false, 3,
+            "Player-6933-" .. string.format("%08X", i)
+    end
+    G.GetGuildRosterLastOnline = function(i)
+        local r = Stub.roster[i]
+        if r and r[9] then return r[9][1], r[9][2], r[9][3], r[9][4] end
+        return 0, 0, 0, 0
+    end
     G.GetGuildRosterMOTD = function() return inGuild and "Raid Friday!" or "" end
     G.C_GuildInfo = {
         GuildRoster = function() Stub.rosterRequests = (Stub.rosterRequests or 0) + 1 end,
