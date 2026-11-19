@@ -53,9 +53,19 @@ character level 29 Hunter, Guild Master of a 55-member guild. Design doc §10 as
   `GetProfessionInfo(i)` returns 11 values (name, icon, rank, max, ...).
 - The Classic API is missing: `GetSkillLineInfo`, `GetNumSkillLines`, `GetTradeSkill*`, `GetCraft*`,
   and the `CRAFT_*` events.
-- With a profession window open, `C_TradeSkillUI.GetAllRecipeIDs` lists the recipes (132 for
-  Leatherworking) and `C_TradeSkillUI.GetBaseProfessionInfo` returns a table. The recipe-info field
-  layout has not been captured yet (open a profession window during a probe run).
+- With a profession window open, `C_TradeSkillUI.GetAllRecipeIDs` returns **every recipe in the
+  profession, learned or not**. Leatherworking returned 132 in one capture and 592 in another, and
+  the sampled recipes had `learned = false`. Filter on `GetRecipeInfo(id).learned`.
+- `C_TradeSkillUI.GetRecipeInfo(id)` returns the Retail `TradeSkillRecipeInfo` table (`recipeID`,
+  `name`, `learned`, `craftable`, `categoryID`, `hyperlink`, `icon`, `maxTrivialLevel`, ...).
+  `GetRecipeLink(id)` works.
+- `C_TradeSkillUI.GetBaseProfessionInfo()` returns `professionID` (165 = Leatherworking),
+  `professionName`, `skillLevel`, `maxSkillLevel` and `isPrimaryProfession`. The child
+  (expansion-tier) profession info is empty.
+- `GetTradeSkillListLink()` returns a link (a shareable profession link may be possible).
+  `IsTradeSkillLinked` and `IsTradeSkillGuild` are false for your own window.
+- Recipe data is only available while the profession window is open, so GuildHub has to capture it on
+  `TRADE_SKILL_SHOW` / `TRADE_SKILL_LIST_UPDATE` and cache it.
 
 ## UI, settings, utilities
 - Every template probed works: `BackdropTemplate`, `ButtonFrameTemplate`, `PortraitFrameTemplate`,
@@ -77,4 +87,4 @@ character level 29 Hunter, Guild Master of a 55-member guild. Design doc §10 as
 - Messaging inside instances, in combat, and during encounters (secret values or lockdown).
 - Two clients exchanging messages (needs a guildmate running the probe).
 - Throttle limits under bursts of messages.
-- The recipe-info fields from `C_TradeSkillUI`.
+- Ordinary chat events (guild, whisper, party) and PARTY-channel addon messages. The probe does not record these.
