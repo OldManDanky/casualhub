@@ -84,12 +84,12 @@ scenarios.fresh = function()
     local CH = boot()
     check(CH.ready, "core ready after PLAYER_LOGIN")
     check(CH.Compat.isForever, "detects Forever (project 18)")
-    check(CasualHubDB and CasualHubDB.schemaVersion == 1, "database created at schema 1")
+    check(CasualHubDB and CasualHubDB.schemaVersion == 2, "database created at the current schema")
     check(CH.Modules:IsRunning("Dashboard") and CH.Modules:IsRunning("Settings"), "Dashboard and Settings running")
     check(CH.Identity:PlayerKey() == "Ghazneth Strongbow", "player key is full First Last name")
     check(CH.Identity:Normalize("Ghazneth-Strongbow") == "Ghazneth Strongbow", "First-Last normalizes to First Last")
     check(CH.Identity:IsPlayer("Ghazneth Strongbow") and not CH.Identity:IsPlayer("Ghazneth"), "first name alone is not the player")
-    check(CH.Identity:GuildKey() == "Da Filthy Casuals@CAMWOWUS2Realm7PvE", "guild key")
+    check(CH.Identity:GuildKey() == "Da Filthy Casuals", "guild key is the guild name (realm names vary on Forever)")
     check(CH.Permissions:PlayerRole() == "guildmaster", "rank 0 is guildmaster")
     check(CH.Permissions:Can("postAnnouncement"), "guildmaster can post announcements")
     check(Stub.settingsCategory ~= nil, "registered Blizzard Settings category")
@@ -185,10 +185,34 @@ scenarios.corrupt = function()
     check(CH.Settings:Get("scale") == 1.0, "invalid scale reset to default")
     check(CH.Settings:Get("minimap.show") == true, "invalid minimap table rebuilt")
     check(CasualHubDB.settings.extra == 1, "unknown settings kept for forward compatibility")
-    check(CasualHubDB.schemaVersion == 1 and type(CasualHubCharDB) == "table", "both databases repaired")
+    check(CasualHubDB.schemaVersion == 2 and type(CasualHubCharDB) == "table", "both databases repaired")
     local warned = false
     for _, e in ipairs(CH.Log.entries) do if e.level == "warn" and contains(e.msg, "reset invalid settings") then warned = true end end
     check(warned, "repairs logged")
+    noErrors(CH)
+end
+
+scenarios.migrate_guild_keys = function()
+    -- Schema 1 saved the same guild under two realm spellings (seen in-game on 2026-11-19).
+    local saved = { GuildHubDB = nil, CasualHubDB = { schemaVersion = 1, settings = {}, data = { account = {}, guilds = {
+        ["Da Filthy Casuals@CAMWOWUS2Realm7PvE"] = { profiles = {
+            ["Thrall Stormrage"] = { id = "Thrall Stormrage", owner = "Thrall Stormrage", rev = 4, updatedAt = 1, roles = { "tank" } },
+            ["Jaina Proudmoore"] = { id = "Jaina Proudmoore", owner = "Jaina Proudmoore", rev = 1, updatedAt = 1 } },
+            roster = { members = { ["Thrall Stormrage"] = { level = 60 } } } },
+        ["Da Filthy Casuals@CAMWOWUS1Realm7PvE"] = { profiles = {
+            ["Thrall Stormrage"] = { id = "Thrall Stormrage", owner = "Thrall Stormrage", rev = 2, updatedAt = 1, roles = { "healer" } },
+            ["Ghazneth Ironhide"] = { id = "Ghazneth Ironhide", owner = "Ghazneth Ironhide", rev = 1, updatedAt = 1 } } },
+    } } }, CasualHubCharDB = { schemaVersion = 1 } }
+    local CH = boot(nil, { CasualHubDB = saved.CasualHubDB, CasualHubCharDB = saved.CasualHubCharDB })
+    local guilds = CasualHubDB.data.guilds
+    local keys = {}
+    for k in pairs(guilds) do keys[#keys + 1] = k end
+    check(#keys == 1 and keys[1] == "Da Filthy Casuals", "realm-suffixed guild keys merged into one")
+    local profiles = guilds["Da Filthy Casuals"].profiles
+    check(profiles["Thrall Stormrage"].rev == 4 and profiles["Thrall Stormrage"].roles[1] == "tank", "merge keeps the higher revision")
+    check(profiles["Jaina Proudmoore"] and profiles["Ghazneth Ironhide"], "records from both keys kept")
+    check(CasualHubDB.schemaVersion == 2 and not CH.Store.readOnly, "migrated to schema 2")
+    check(CH.Profiles:Get("Thrall Stormrage") and CH.Profiles:Get("Thrall Stormrage").roles[1] == "tank", "merged data visible")
     noErrors(CH)
 end
 
@@ -212,7 +236,7 @@ scenarios.store = function()
     check(seen == "acct:k", "STORE_CHANGED published")
     check(CH.Store:Put("mine", "k", { v = 2 }) and CasualHubCharDB.data.mine.k.v == 2, "char record stored per character")
     check(CH.Store:Put("guildy", "k", { v = 3 })
-        and CasualHubDB.data.guilds["Da Filthy Casuals@CAMWOWUS2Realm7PvE"].guildy.k.v == 3, "guild record scoped to guild key")
+        and CasualHubDB.data.guilds["Da Filthy Casuals"].guildy.k.v == 3, "guild record scoped to guild key")
     CH.Store:Delete("acct", "k")
     check(CH.Store:Get("acct", "k") == nil, "delete")
     local ok = pcall(CH.Store.Get, CH.Store, "nope", "k")

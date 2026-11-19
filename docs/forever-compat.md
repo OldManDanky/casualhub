@@ -27,6 +27,10 @@ character level 29 Hunter, Guild Master of a 55-member guild. Design doc §10 as
   members who are online, or filter that system message for whispers the addon sent.
 - `Ambiguate()` has nothing to strip here. Never split a name on its space.
 - The WTF per-character folder is named `First-Last`.
+- **Realm names are not stable.** `GetNormalizedRealmName()` returned `CAMWOWUS2Realm7PvE` (display name
+  "CAMWOW US2 Realm 7 PvE"), but in the next session the same guild was keyed as `CAMWOWUS1Realm7PvE`,
+  most likely from `GetGuildInfo`'s realm value. Don't build persistent keys from realm names; Casual Hub
+  keys guild data by guild name alone.
 
 ## Addon messaging
 - `C_ChatInfo.RegisterAddonMessagePrefix`, `SendAddonMessage` and `SendAddonMessageLogged` work.

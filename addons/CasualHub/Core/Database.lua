@@ -8,7 +8,7 @@ local _, CH = ...
 local Store = { namespaces = {}, migrations = {}, readOnly = false }
 CH.Store = Store
 
-Store.SCHEMA_VERSION = 1
+Store.SCHEMA_VERSION = 2
 
 local DEFAULT_SETTINGS = {
     debug = false,
@@ -26,6 +26,39 @@ Store.DEFAULT_SETTINGS = DEFAULT_SETTINGS
 -- Migrations[n] upgrades a database from version n-1 to n. They receive the account and character tables.
 Store.migrations[1] = function(db, charDb)
     -- 0 -> 1: initial layout. Nothing to transform; Init() builds the structure.
+end
+
+-- 1 -> 2: guild data was keyed "Guild Name@Realm", but Forever reports varying realm names for the same guild.
+-- Merge every "Name@*" bucket into "Name", keeping the higher revision of each record.
+Store.migrations[2] = function(db, charDb)
+    local guilds = type(db.data) == "table" and db.data.guilds
+    if type(guilds) ~= "table" then return end
+    local oldKeys = {}
+    for key in pairs(guilds) do
+        if type(key) == "string" and key:find("@", 1, true) then oldKeys[#oldKeys + 1] = key end
+    end
+    table.sort(oldKeys)
+    for _, key in ipairs(oldKeys) do
+        local newKey = key:match("^(.*)@[^@]*$")
+        local src = guilds[key]
+        guilds[key] = nil
+        if type(src) == "table" and newKey and newKey ~= "" then
+            local dst = guilds[newKey] or {}
+            guilds[newKey] = dst
+            for namespace, bucket in pairs(src) do
+                if type(bucket) == "table" then
+                    local target = dst[namespace] or {}
+                    dst[namespace] = target
+                    for id, record in pairs(bucket) do
+                        local existing = target[id]
+                        local newer = type(record) == "table" and type(existing) == "table"
+                            and type(record.rev) == "number" and record.rev > (tonumber(existing.rev) or 0)
+                        if existing == nil or newer then target[id] = record end
+                    end
+                end
+            end
+        end
+    end
 end
 
 local function deepCopy(value)

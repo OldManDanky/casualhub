@@ -51,16 +51,16 @@ function Identity:PlayerGUID()
     return UnitGUID("player")
 end
 
--- "Guild Name@Realm", or nil when not in a guild or the client has not loaded guild info yet.
+-- The guild's name, or nil when not in a guild or the client has not loaded guild info yet.
+-- Realm names are not stable on Forever: the same guild was reported under both "CAMWOWUS1Realm7PvE"
+-- (GetGuildInfo) and "CAMWOWUS2Realm7PvE" (the player's realm) in back-to-back sessions, so the key is the
+-- guild name alone. Schema migration 2 merges data saved under the old "Name@Realm" keys.
 function Identity:GuildKey()
-    if self.guildKey ~= nil then return self.guildKey or nil end
+    if self.guildKey ~= nil then return self.guildKey end
     if not (IsInGuild and IsInGuild()) then return nil end
-    local guildName, _, _, guildRealm = GetGuildInfo("player")
-    if type(guildName) ~= "string" or guildName == "" then return nil end
-    if type(guildRealm) ~= "string" or guildRealm == "" then
-        guildRealm = (GetNormalizedRealmName and GetNormalizedRealmName()) or GetRealmName()
-    end
-    self.guildKey = guildName .. "@" .. tostring(guildRealm)
+    local guildName = GetGuildInfo("player")
+    if type(guildName) ~= "string" or guildName == "" or CH.Compat.IsSecret(guildName) then return nil end
+    self.guildKey = guildName
     return self.guildKey
 end
 
