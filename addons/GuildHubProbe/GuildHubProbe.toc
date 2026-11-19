@@ -1,7 +1,7 @@
 ## Interface: 16001
 ## Title: GuildHub Probe
 ## Notes: Compatibility probe for GuildHub on WoW Forever. Records which client APIs, events, templates and addon-message behaviors are available. Type /ghprobe.
-## Version: 0.1.0
+## Version: 0.2.0
 ## IconTexture: Interface\Icons\INV_Misc_Spyglass_02
 ## SavedVariables: GuildHubProbeDB
 ## SavedVariablesPerCharacter: GuildHubProbeCharDB

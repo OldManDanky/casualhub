@@ -6,7 +6,7 @@
 -- Commands: /ghprobe (show report), /ghprobe run (re-run), /ghprobe reset (clear saved data).
 
 local ADDON_NAME = ...
-local PROBE_VERSION = "0.1.0"
+local PROBE_VERSION = "0.2.0"
 local PREFIX = "GHProbe1"
 local COMM_WAIT = 6       -- seconds to wait for addon-message echoes
 local ROSTER_WAIT = 10    -- seconds to wait for GUILD_ROSTER_UPDATE
@@ -114,10 +114,29 @@ local function selfName()
     return UnitName("player")
 end
 
+-- Forever reports senders as "Name Realm" (space, not hyphen), so Ambiguate does not strip the realm.
+-- Character names never contain spaces or hyphens, so the leading run identifies the character.
+local function shortName(name)
+    if type(name) ~= "string" or isSecret(name) then return nil end
+    return name:match("^[^%s%-]+")
+end
+
 local function isSelf(sender)
-    if not sender or isSecret(sender) then return false end
-    local short = Ambiguate and Ambiguate(sender, "none") or sender:match("^[^-]+")
-    return short == selfName()
+    return shortName(sender) == selfName()
+end
+
+local function nameFormat(name)
+    if type(name) ~= "string" or isSecret(name) then return "unknown" end
+    if name:find("-", 1, true) then return "Name-Realm" end
+    if name:find(" ", 1, true) then return "Name Realm" end
+    return "Name"
+end
+
+local function describeFields(t)
+    if type(t) ~= "table" or isSecret(t) then return describe(t) end
+    local out = {}
+    for k, v in pairs(t) do out[tostring(k)] = describe(v) end
+    return out
 end
 
 ---------------------------------------------------------------------------
@@ -146,6 +165,11 @@ local FUNCTIONS = {
     "C_TradeSkillUI.GetAllRecipeIDs", "C_TradeSkillUI.GetRecipeInfo",
     "C_TradeSkillUI.GetBaseProfessionInfo", "C_TradeSkillUI.GetChildProfessionInfo",
     "C_TradeSkillUI.GetTradeSkillLine", "C_TradeSkillUI.IsTradeSkillLinked",
+    "C_TradeSkillUI.GetProfessionInfoBySkillLineID", "C_TradeSkillUI.GetRecipeSchematic",
+    "C_TradeSkillUI.GetRecipeItemLink", "C_TradeSkillUI.GetRecipeLink", "C_TradeSkillUI.GetTradeSkillListLink",
+    "C_TradeSkillUI.GetCategories", "C_TradeSkillUI.GetCategoryInfo", "C_TradeSkillUI.IsTradeSkillGuild",
+    "C_GuildInfo.QueryGuildMembersForRecipe", "GetGuildRecipeMember", "GetNumGuildTradeSkill",
+    "QueryGuildRecipes", "GetGuildTradeSkillInfo", "UnitFullName",
     -- Time, timers, calendar
     "C_Timer.After", "C_Timer.NewTicker", "C_Timer.NewTimer", "GetServerTime", "time", "date",
     "C_DateAndTime.GetCurrentCalendarTime", "C_DateAndTime.GetServerTimeLocal",
@@ -218,6 +242,8 @@ local function probeMeta()
         hasUtf8 = type(utf8) == "table",
     }
     if GetPhysicalScreenSize then m.physicalScreen = describeAll(pack(GetPhysicalScreenSize())) end
+    m.realmDisplayName = GetRealmName()
+    if UnitFullName then m.unitFullName = describeAll(pack(UnitFullName("player"))) end
     if GetCurrentRegion then m.region = GetCurrentRegion() end
     if GetExpansionLevel then m.expansionLevel = GetExpansionLevel() end
     if GetMaxPlayerLevel then m.maxPlayerLevel = GetMaxPlayerLevel() end
@@ -305,7 +331,15 @@ local function captureTradeWindow(kind)
     local ok, line = try("GetTradeSkillLine")
     if ok then w.tradeSkillLine = describeAll(line) end
     ok, line = try("C_TradeSkillUI.GetBaseProfessionInfo")
-    if ok then w.baseProfessionInfo = describe(line[1]) end
+    if ok then w.baseProfessionInfo = describeFields(line[1]) end
+    ok, line = try("C_TradeSkillUI.GetChildProfessionInfo")
+    if ok then w.childProfessionInfo = describeFields(line[1]) end
+    ok, line = try("C_TradeSkillUI.IsTradeSkillLinked")
+    if ok then w.isLinked = describeAll(line) end
+    ok, line = try("C_TradeSkillUI.IsTradeSkillGuild")
+    if ok then w.isGuild = describeAll(line) end
+    ok, line = try("C_TradeSkillUI.GetTradeSkillListLink")
+    if ok then w.listLinkAvailable = type(line[1]) == "string" and #line[1] > 0 end
     local num = (kind == "craft" and GetNumCrafts and GetNumCrafts()) or (GetNumTradeSkills and GetNumTradeSkills())
     w.numEntries = num
     local infoFn = kind == "craft" and "GetCraftInfo" or "GetTradeSkillInfo"
@@ -318,7 +352,19 @@ local function captureTradeWindow(kind)
         end
     end
     ok, line = try("C_TradeSkillUI.GetAllRecipeIDs")
-    if ok and type(line[1]) == "table" then w.modernRecipeCount = #line[1] end
+    if ok and type(line[1]) == "table" then
+        local ids = line[1]
+        w.modernRecipeCount = #ids
+        w.sampleRecipes = {}
+        for i = 1, math.min(#ids, 3) do
+            local ok2, info = try("C_TradeSkillUI.GetRecipeInfo", ids[i])
+            w.sampleRecipes[i] = ok2 and describeFields(info[1]) or info
+        end
+        if ids[1] then
+            local ok3, link = try("C_TradeSkillUI.GetRecipeLink", ids[1])
+            w.recipeLinkWorks = ok3 and type(link[1]) == "string"
+        end
+    end
     local key = (w.tradeSkillLine and w.tradeSkillLine[1]) or kind
     report.professions.windows = report.professions.windows or {}
     report.professions.windows[tostring(key)] = w
@@ -340,16 +386,17 @@ local function captureRoster(g)
     g.rosterEventAfter = g.requestedAt and (GetTime() - g.requestedAt) or nil
     local total, online, onlineMobile = GetNumGuildMembers()
     g.counts = { total = describe(total), online = describe(online), onlineAndMobile = describe(onlineMobile) }
-    local me = selfName()
+    g.nameFormats = {}
     for i = 1, total or 0 do
         local r = pack(GetGuildRosterInfo(i))
         if i == 1 then
             g.rosterReturnCount = r.n
             g.rosterReturnTypes = typesOf(r)
-            g.sampleNameFormat = (type(r[1]) == "string" and not isSecret(r[1]) and r[1]:find("-")) and "Name-Realm" or "Name"
         end
-        local name = r[1]
-        if type(name) == "string" and not isSecret(name) and (name == me or isSelf(name)) then
+        local fmt = nameFormat(r[1])
+        g.nameFormats[fmt] = (g.nameFormats[fmt] or 0) + 1
+        if isSecret(r[1]) or isSecret(r[7]) or isSecret(r[8]) then g.secretFieldsSeen = true end
+        if isSelf(r[1]) then
             local row = describeAll(r)
             -- Keep notes out of the report; record only whether they are readable.
             if type(r[7]) == "string" then row[7] = "<public note, " .. #r[7] .. " chars>" end
@@ -357,10 +404,11 @@ local function captureRoster(g)
             g.selfRow = row
             g.selfIndex = i
         end
-    end
-    if GetGuildRosterLastOnline and (total or 0) > 0 then
-        local ok, r = try("GetGuildRosterLastOnline", 1)
-        g.lastOnlineReturnTypes = ok and typesOf(r) or r
+        if r[9] == false and not g.offlineLastOnline and GetGuildRosterLastOnline then
+            -- Types only; no other member's data is stored.
+            local ok, lo = try("GetGuildRosterLastOnline", i)
+            g.offlineLastOnline = ok and typesOf(lo) or lo
+        end
     end
 end
 
@@ -397,6 +445,7 @@ local function probeGuild()
         asyncDone()
     end
     handlers.GUILD_ROSTER_UPDATE = function() finish("event") end
+    g.countBeforeRequest = describe((GetNumGuildMembers()))
     g.requestedAt = GetTime()
     local ok, err = try("C_GuildInfo.GuildRoster")
     if ok then g.rosterRequest = "C_GuildInfo.GuildRoster" else
@@ -489,11 +538,14 @@ local function onAddonMessage(event, prefix, text, channel, sender, target)
         c.secretPayloadSeen = (c.secretPayloadSeen or 0) + 1
         return
     end
-    c.senderFormatSample = c.senderFormatSample or (sender and (sender:find("-") and "Name-Realm" or "Name"))
+    c.senderFormats = c.senderFormats or {}
+    c.senderFormats[channel .. ":" .. nameFormat(sender)] = true
     local kind, nonce, label = text:match("^(%u+):(%d+):([%w%-%.]+)")
     if kind == "PING" and commState and nonce == commState.nonce and isSelf(sender) then
+        c.selfSenderRaw = sender  -- own name only
         local entry = c.tests[label]
         if entry then
+            entry.receiptCount = (entry.receiptCount or 0) + 1
             entry.received = true
             entry.receivedVia = event
             entry.receivedChannel = channel
