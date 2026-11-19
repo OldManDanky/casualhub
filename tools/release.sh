@@ -5,8 +5,7 @@
 #
 # Checks the tree is clean and tests pass, builds dist/<Addon>-<x.y.z>-forever.zip
 # (just the addon folder, ready to unzip into AddOns), tags v<version>, pushes
-# main and the tag, creates the release (pre-release when the version contains
-# alpha/beta/rc) and uploads the zip.
+# main and the tag, creates the release (marked Latest) and uploads the zip.
 #
 # Token: $GITHUB_TOKEN, or the file ~/.config/casualhub/github_token (chmod 600).
 # It needs a fine-grained token for this repo with Contents: read and write.
@@ -29,7 +28,9 @@ TAG="v$VERSION"
 # Asset name required by the Forever addon listings: <Addon>-<major.minor.patch>-forever.zip
 # (the pre-release suffix stays on the tag and release title, not the file name).
 ZIP="dist/$ADDON-${VERSION%%-*}-forever.zip"
-PRERELEASE=false; [[ "$VERSION" =~ (alpha|beta|rc) ]] && PRERELEASE=true
+# Published as a normal release so it shows as "Latest" on the repo page (pre-releases never do),
+# even for -alpha versions. Set PRERELEASE=true in the environment to override.
+PRERELEASE=${PRERELEASE:-false}
 
 [[ "$(git rev-parse --abbrev-ref HEAD)" == main ]] || { echo "not on main" >&2; exit 1; }
 [[ -z "$(git status --porcelain)" ]] || { echo "working tree not clean" >&2; exit 1; }
@@ -53,7 +54,7 @@ git push -q origin main "$TAG"
 
 echo "== create release"
 BODY=$(python3 -I -c 'import json,sys; print(json.dumps({"tag_name": sys.argv[1], "name": sys.argv[2],
-    "body": open(sys.argv[3], encoding="utf-8").read(), "prerelease": sys.argv[4] == "true"}))' \
+    "body": open(sys.argv[3], encoding="utf-8").read(), "prerelease": sys.argv[4] == "true", "make_latest": "false" if sys.argv[4] == "true" else "true"}))' \
     "$TAG" "Casual Hub $VERSION" "$NOTES" "$PRERELEASE")
 RELEASE=$(api -X POST "https://api.github.com/repos/$REPO/releases" -d "$BODY")
 read -r RID URL < <(printf '%s' "$RELEASE" | python3 -I -c 'import json,sys; r=json.load(sys.stdin); print(r["id"], r["html_url"])')
