@@ -1,7 +1,7 @@
 ## Interface: 16001
 ## Title: Casual Hub
 ## Notes: Guild member discovery, activity requests, events, crafting and announcements in one window. Type /chub.
-## Version: 0.3.0-alpha
+## Version: 0.3.1-alpha
 ## IconTexture: Interface\AddOns\CasualHub\Media\icon256.tga
 ## SavedVariables: CasualHubDB
 ## SavedVariablesPerCharacter: CasualHubCharDB

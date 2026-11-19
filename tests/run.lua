@@ -375,6 +375,15 @@ scenarios.sync = function()
     peerSend(CH, "HELLO", { d = { profile = CH.Sync:Digest("profile") } }, "GUILD", "Ghazneth Ironhide")
     Stub.advance(5)
     check(#sentMessages(CH, "SUM") == 0, "no summary when digests match")
+    local his = sentMessages(CH, "HI")
+    check(#his == 1 and his[1].target == "Ghazneth Ironhide" and his[1].channel == "WHISPER",
+        "presence reply to each new peer, even when nothing needs syncing")
+    Stub.sent = {}
+    peerSend(CH, "HELLO", { d = { profile = CH.Sync:Digest("profile") } }, "GUILD", "Ghazneth Ironhide")
+    Stub.advance(5)
+    check(#sentMessages(CH, "HI") == 0, "only one presence reply per peer per session")
+    peerSend(CH, "HI", {}, "WHISPER", "Jaina Proudmoore")
+    check(CH.Comm:Peer("Jaina Proudmoore") ~= nil and CH.Comm.stats.unknownType == 0, "HI marks the sender as a peer")
 
     Stub.sent = {}
     peerSend(CH, "SUM", { y = "profile", s = { ["Thrall Stormrage"] = 2 } })

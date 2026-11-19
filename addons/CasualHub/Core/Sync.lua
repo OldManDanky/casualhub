@@ -10,13 +10,15 @@
 --   SUM   (WHISPER)  { y = type, s = { [id] = rev }, pg, pgs }       reply to a HELLO whose digest differs
 --   REQ   (WHISPER)  { y = type, ids = { id, ... } }                 ask a peer for records it has newer
 --   REC   (either)   { y = type, r = record }                        a record (or tombstone)
+--   HI    (WHISPER)  {}                                             presence reply to a HELLO, once per peer per
+--                                                                   session, so users see each other right away
 --
 -- Ownership can't be proven from addon messages (a modified client can forge them). Mitigations: strict
 -- validation, owners must be current guild members, and an owner who sees a forged newer copy of their own
 -- record republishes theirs with a higher revision.
 local _, CH = ...
 
-local Sync = { types = {}, lastSummaryTo = {}, requested = {}, stats = { accepted = 0, rejected = 0, stale = 0, selfHealed = 0 } }
+local Sync = { types = {}, lastSummaryTo = {}, requested = {}, greeted = {}, stats = { accepted = 0, rejected = 0, stale = 0, selfHealed = 0 } }
 CH.Sync = Sync
 
 local HELLO_DELAY_MIN, HELLO_DELAY_MAX = 6, 14
@@ -194,6 +196,11 @@ end
 
 function Sync:OnHello(sender, body)
     if type(body) ~= "table" or type(body.d) ~= "table" then return end
+    if not self.greeted[sender] then
+        -- Without this, a peer whose data already matches never answers, and neither side knows the other is here.
+        self.greeted[sender] = true
+        C_Timer.After(math.random() * 2, function() CH.Comm:Send("HI", {}, "WHISPER", sender) end)
+    end
     local last = self.lastSummaryTo[sender]
     if last and time() - last < SUMMARY_COOLDOWN then return end
     local differing = {}
@@ -301,6 +308,7 @@ function Sync:Init()
     Comm:RegisterHandler("SUM", function(...) Sync:OnSummary(...) end)
     Comm:RegisterHandler("REQ", function(...) Sync:OnRequest(...) end)
     Comm:RegisterHandler("REC", function(...) Sync:OnRecord(...) end)
+    Comm:RegisterHandler("HI", function() end)  -- presence is recorded by the transport for every message
 
     -- First HELLO once the roster and guild are known; retry a few times if they aren't yet.
     local attempts = 0
