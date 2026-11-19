@@ -6,9 +6,9 @@
 -- Commands: /ghprobe (show report), /ghprobe run (re-run), /ghprobe reset (clear saved data).
 
 local ADDON_NAME = ...
-local PROBE_VERSION = "0.2.0"
+local PROBE_VERSION = "0.3.0"
 local PREFIX = "GHProbe1"
-local COMM_WAIT = 6       -- seconds to wait for addon-message echoes
+local COMM_WAIT = 8       -- seconds to wait for addon-message echoes
 local ROSTER_WAIT = 10    -- seconds to wait for GUILD_ROSTER_UPDATE
 local START_DELAY = 3     -- seconds after entering the world before probing
 
@@ -110,26 +110,59 @@ local function after(seconds, fn)
     end
 end
 
+-- Forever characters have surnames: addon-message senders and roster entries look like "First Last",
+-- while UnitName("player") returns only "First". Which API exposes the full name is what we are probing.
+local learnedSelfName   -- full name discovered from the roster (GUID match)
+
 local function selfName()
     return UnitName("player")
 end
 
--- Forever reports senders as "Name Realm" (space, not hyphen), so Ambiguate does not strip the realm.
--- Character names never contain spaces or hyphens, so the leading run identifies the character.
-local function shortName(name)
-    if type(name) ~= "string" or isSecret(name) then return nil end
-    return name:match("^[^%s%-]+")
+local function selfNameCandidates()
+    local list, seen = {}, {}
+    local function add(v)
+        if type(v) == "string" and v ~= "" and not isSecret(v) and not seen[v] then
+            seen[v] = true
+            list[#list + 1] = v
+        end
+    end
+    add(learnedSelfName)
+    if GetUnitName then add(GetUnitName("player", true)) end
+    if UnitNameUnmodified then add(UnitNameUnmodified("player")) end
+    if UnitFullName then
+        local n, r = UnitFullName("player")
+        if r and r ~= "" then add(n .. "-" .. r) end
+    end
+    add(UnitName("player"))
+    return list
 end
 
-local function isSelf(sender)
-    return shortName(sender) == selfName()
+local function isSelf(name)
+    if type(name) ~= "string" or isSecret(name) then return false end
+    for _, candidate in ipairs(selfNameCandidates()) do
+        if name == candidate then return true end
+    end
+    return false
 end
 
 local function nameFormat(name)
     if type(name) ~= "string" or isSecret(name) then return "unknown" end
     if name:find("-", 1, true) then return "Name-Realm" end
-    if name:find(" ", 1, true) then return "Name Realm" end
-    return "Name"
+    if name:find(" ", 1, true) then return "First Last" end
+    return "First"
+end
+
+-- Finds the player's own roster row by GUID (field 17), so name format does not matter.
+local function findSelfInRoster()
+    if not (GetNumGuildMembers and GetGuildRosterInfo and UnitGUID) then return nil end
+    local guid = UnitGUID("player")
+    for i = 1, (GetNumGuildMembers()) or 0 do
+        local r = pack(GetGuildRosterInfo(i))
+        if r[17] ~= nil and not isSecret(r[17]) and r[17] == guid then
+            if type(r[1]) == "string" and not isSecret(r[1]) then learnedSelfName = r[1] end
+            return i, r
+        end
+    end
 end
 
 local function describeFields(t)
@@ -243,7 +276,15 @@ local function probeMeta()
     }
     if GetPhysicalScreenSize then m.physicalScreen = describeAll(pack(GetPhysicalScreenSize())) end
     m.realmDisplayName = GetRealmName()
-    if UnitFullName then m.unitFullName = describeAll(pack(UnitFullName("player"))) end
+    -- Own name through every API that might carry the surname.
+    m.selfNames = {
+        UnitName = describeAll(pack(UnitName("player"))),
+        UnitFullName = UnitFullName and describeAll(pack(UnitFullName("player"))) or "missing",
+        GetUnitName_withRealm = GetUnitName and describe(GetUnitName("player", true)) or "missing",
+        GetUnitName_noRealm = GetUnitName and describe(GetUnitName("player", false)) or "missing",
+        UnitNameUnmodified = UnitNameUnmodified and describeAll(pack(UnitNameUnmodified("player"))) or "missing",
+        UnitPVPName = UnitPVPName and describe(UnitPVPName("player")) or "missing",
+    }
     if GetCurrentRegion then m.region = GetCurrentRegion() end
     if GetExpansionLevel then m.expansionLevel = GetExpansionLevel() end
     if GetMaxPlayerLevel then m.maxPlayerLevel = GetMaxPlayerLevel() end
@@ -387,6 +428,8 @@ local function captureRoster(g)
     local total, online, onlineMobile = GetNumGuildMembers()
     g.counts = { total = describe(total), online = describe(online), onlineAndMobile = describe(onlineMobile) }
     g.nameFormats = {}
+    local selfIndex = findSelfInRoster()
+    local firstNames, distinctFirst, distinctFull, fullSeen = {}, 0, 0, {}
     for i = 1, total or 0 do
         local r = pack(GetGuildRosterInfo(i))
         if i == 1 then
@@ -396,13 +439,20 @@ local function captureRoster(g)
         local fmt = nameFormat(r[1])
         g.nameFormats[fmt] = (g.nameFormats[fmt] or 0) + 1
         if isSecret(r[1]) or isSecret(r[7]) or isSecret(r[8]) then g.secretFieldsSeen = true end
-        if isSelf(r[1]) then
+        -- Counts only: are first names alone unique, or is the full name needed as the identity key?
+        if type(r[1]) == "string" and not isSecret(r[1]) then
+            local first = r[1]:match("^%S+")
+            if not firstNames[first] then firstNames[first] = true; distinctFirst = distinctFirst + 1 end
+            if not fullSeen[r[1]] then fullSeen[r[1]] = true; distinctFull = distinctFull + 1 end
+        end
+        if i == selfIndex then
             local row = describeAll(r)
             -- Keep notes out of the report; record only whether they are readable.
             if type(r[7]) == "string" then row[7] = "<public note, " .. #r[7] .. " chars>" end
             if type(r[8]) == "string" then row[8] = "<officer note, " .. #r[8] .. " chars>" end
             g.selfRow = row
             g.selfIndex = i
+            g.selfRosterName = describe(r[1])  -- own name only
         end
         if r[9] == false and not g.offlineLastOnline and GetGuildRosterLastOnline then
             -- Types only; no other member's data is stored.
@@ -410,6 +460,8 @@ local function captureRoster(g)
             g.offlineLastOnline = ok and typesOf(lo) or lo
         end
     end
+    g.nameUniqueness = { members = total, distinctFullNames = distinctFull, distinctFirstNames = distinctFirst }
+    g.selfFoundByGuid = selfIndex ~= nil
 end
 
 local function probeGuild()
@@ -492,39 +544,54 @@ local function probeComms()
     c.inCombat = InCombatLockdown()
     if IsInInstance then c.instance = describeAll(pack(IsInInstance())) end
 
+    -- Only this client knows the nonce, so a PING carrying it is our own echo whatever the sender string is.
     local nonce = tostring(math.random(100000, 999999))
-    commState = { nonce = nonce, sentAt = {}, c = c }
-    local me = selfName()
-    local tests = {
-        { label = "whisper-self-small", channel = "WHISPER", target = me },
-        { label = "whisper-self-255", channel = "WHISPER", target = me, length = 255 },
-        { label = "whisper-self-256", channel = "WHISPER", target = me, length = 256 },
-        { label = "whisper-self-4000", channel = "WHISPER", target = me, length = 4000 },
-    }
-    if IsInGuild and IsInGuild() then
-        tests[#tests + 1] = { label = "guild-small", channel = "GUILD" }
-    end
-    for _, t in ipairs(tests) do
-        local text = buildPayload(nonce, t.label, t.length)
-        local sendOk, res = sendAddon(t.channel, t.target, text)
-        local entry = { channel = t.channel, length = #text, received = false }
+    commState = { nonce = nonce, sentAt = {}, targets = {}, c = c }
+    findSelfInRoster()  -- learn our full "First Last" name before choosing whisper targets
+    local function send(label, channel, target, length)
+        local text = buildPayload(nonce, label, length)
+        local sendOk, res = sendAddon(channel, target, text)
+        local entry = { channel = channel, target = target, length = #text, received = false }
         if sendOk then
             entry.sendReturns = describeAll(res)
             entry.sendResultName = enumName(Enum and Enum.SendAddonMessageResult, res[1])
         else
             entry.sendError = res
         end
-        commState.sentAt[t.label] = GetTime()
-        c.tests[t.label] = entry
+        commState.sentAt[label] = GetTime()
+        commState.targets[label] = target
+        c.tests[label] = entry
+    end
+    commState.send = send
+
+    -- Small whisper to each candidate spelling of our own name; size tests follow on the first that echoes.
+    c.whisperCandidates = selfNameCandidates()
+    for i, candidate in ipairs(c.whisperCandidates) do
+        send("whisper-small-" .. i, "WHISPER", candidate)
+    end
+    if IsInGuild and IsInGuild() then
+        send("guild-small", "GUILD")
     end
 
     pendingAsync = pendingAsync + 1
     after(COMM_WAIT, function()
-        local received = 0
-        for _, entry in pairs(c.tests) do if entry.received then received = received + 1 end end
-        report.summary.commsReceived = received .. "/" .. #tests
+        local received, total = 0, 0
+        for _, entry in pairs(c.tests) do
+            total = total + 1
+            if entry.received then received = received + 1 end
+        end
+        report.summary.commsReceived = received .. "/" .. total
         asyncDone()
     end)
+end
+
+local function sendSizeTests(target)
+    if commState.sizeTestsSent then return end
+    commState.sizeTestsSent = true
+    report.comms.workingWhisperTarget = target  -- own name only
+    for _, len in ipairs({ 255, 256, 4000 }) do
+        commState.send("whisper-" .. len, "WHISPER", target, len)
+    end
 end
 
 -- Handles our prefix. Our own PINGs come back as receipts; other clients' guild PINGs get a PONG whisper,
@@ -541,8 +608,9 @@ local function onAddonMessage(event, prefix, text, channel, sender, target)
     c.senderFormats = c.senderFormats or {}
     c.senderFormats[channel .. ":" .. nameFormat(sender)] = true
     local kind, nonce, label = text:match("^(%u+):(%d+):([%w%-%.]+)")
-    if kind == "PING" and commState and nonce == commState.nonce and isSelf(sender) then
+    if kind == "PING" and commState and nonce == commState.nonce then
         c.selfSenderRaw = sender  -- own name only
+        c.selfSenderMatchesCandidate = isSelf(sender)
         local entry = c.tests[label]
         if entry then
             entry.receiptCount = (entry.receiptCount or 0) + 1
@@ -552,8 +620,9 @@ local function onAddonMessage(event, prefix, text, channel, sender, target)
             entry.receivedLength = #text
             entry.truncated = #text < entry.length
             entry.latency = commState.sentAt[label] and (GetTime() - commState.sentAt[label]) or nil
+            if label:find("^whisper%-small%-") then sendSizeTests(commState.targets[label]) end
         end
-    elseif kind == "PING" and not isSelf(sender) then
+    elseif kind == "PING" then
         c.peers[sender] = c.peers[sender] or { firstSeen = time() }
         c.peers[sender].pingVia = channel
         if not answered[sender] then
@@ -589,7 +658,8 @@ local function runProbe()
     if running then chat("already running"); return end
     running = true
     pendingAsync = 0
-    local charKey = selfName() .. "-" .. (GetNormalizedRealmName and GetNormalizedRealmName() or GetRealmName())
+    findSelfInRoster()
+    local charKey = (learnedSelfName or selfName()) .. "@" .. (GetNormalizedRealmName and GetNormalizedRealmName() or GetRealmName())
     report = { startedAt = time(), character = charKey, summary = {}, errors = {}, professions = {},
         persistence = GuildHubProbeCharDB and GuildHubProbeCharDB.persistence }
     GuildHubProbeDB.reports[charKey] = report
