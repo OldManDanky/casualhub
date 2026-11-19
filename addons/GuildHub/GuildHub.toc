@@ -1,0 +1,31 @@
+## Interface: 16001
+## Title: GuildHub
+## Notes: Guild member discovery, activity requests, events, crafting and announcements in one window. Type /gh.
+## Version: 0.1.0-alpha
+## IconTexture: Interface\Icons\Ability_Warrior_BattleShout
+## SavedVariables: GuildHubDB
+## SavedVariablesPerCharacter: GuildHubCharDB
+## AddonCompartmentFunc: GuildHub_OnAddonCompartmentClick
+## AddonCompartmentFuncOnEnter: GuildHub_OnAddonCompartmentEnter
+## AddonCompartmentFuncOnLeave: GuildHub_OnAddonCompartmentLeave
+
+Locale\enUS.lua
+
+Core\Init.lua
+Core\Events.lua
+Core\Database.lua
+Core\Identity.lua
+Core\Permissions.lua
+Core\Modules.lua
+Core\Diagnostics.lua
+Core\Commands.lua
+
+UI\Widgets.lua
+UI\Navigation.lua
+UI\MainWindow.lua
+UI\Minimap.lua
+
+Modules\Dashboard\Dashboard.lua
+Modules\Settings\Settings.lua
+
+Core\Lifecycle.lua
