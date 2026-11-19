@@ -36,7 +36,13 @@ character level 29 Hunter, Guild Master of a 55-member guild. Design doc §10 as
 - Measured 2026-11-19 in one session: `GetRealmID()` = `6933` (the same number as in the player GUID
   `Player-6933-...`), `GetNormalizedRealmName()` = `CAMWOWUS2Realm7PvE` (the player's current instance), and
   `GetGuildInfo` realm = `CAMWOWUS1Realm7PvE` (the guild's). `C_GameRules.IsHardcoreActive()` = false on
-  Normal. Whether 6933 identifies the ruleset or a single instance is not known yet.
+  Normal.
+- **Realm IDs are per instance, not per ruleset.** The 55 members of one guild had 9 different GUID realm
+  IDs (6794, 6796, 6797, 6921, 6923, 6925, 6929, 6931, 6933; 4 to 8 members each). A guild spans
+  instances, so neither realm IDs nor realm names identify a guild or a ruleset. Casual Hub keys guilds by name
+  and characters by "First Last" (unique across instances, since guildmates on different instances coexist).
+  If a ruleset key is ever needed, candidates are `C_GameRules.IsHardcoreActive()` and the PvE/PvP suffix
+  of the realm name; both are unverified.
 
 ## Addon messaging
 - `C_ChatInfo.RegisterAddonMessagePrefix`, `SendAddonMessage` and `SendAddonMessageLogged` work.
