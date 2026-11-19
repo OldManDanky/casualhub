@@ -22,6 +22,9 @@ character level 29 Hunter, Guild Master of a 55-member guild. Design doc §10 as
   distinct first names. The identity key must be the full name, or the GUID (`Player-6933-...`,
   roster field 17).
 - Whispers reach the player at `"First Last"` and at `"First-Last"`. They do not reach `"First"` alone.
+  An addon-message whisper to a name that doesn't resolve (first name only, or someone offline) prints the
+  visible system error `No player named '...' is currently playing.` in chat. Only whisper full names of
+  members who are online, or filter that system message for whispers the addon sent.
 - `Ambiguate()` has nothing to strip here. Never split a name on its space.
 - The WTF per-character folder is named `First-Last`.
 
