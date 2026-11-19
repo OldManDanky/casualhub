@@ -1,7 +1,7 @@
 -- Dashboard (design doc §4.1): guild summary, message of the day, and the sections later phases will fill.
-local _, GH = ...
-local L = GH.L
-local W = GH.Widgets
+local _, CH = ...
+local L = CH.L
+local W = CH.Widgets
 
 local Dashboard = {}
 local MODULE = "Dashboard"
@@ -16,26 +16,26 @@ function Dashboard:Refresh()
     local frame = self.frame
     if not frame or not frame:IsVisible() then return end
 
-    local guildName = GH.Identity:GuildName()
+    local guildName = CH.Identity:GuildName()
     local lines = {}
     if guildName then
         local _, rankName = GetGuildInfo("player")
         local online, total = onlineCounts()
         lines[#lines + 1] = ("|cffffffff%s|r"):format(guildName)
-        lines[#lines + 1] = (L["You: %s, %s (%s)"]):format(tostring(GH.Identity:PlayerKey()), tostring(rankName),
-            GH.Permissions:RoleLabel(GH.Permissions:PlayerRole()))
+        lines[#lines + 1] = (L["You: %s, %s (%s)"]):format(tostring(CH.Identity:PlayerKey()), tostring(rankName),
+            CH.Permissions:RoleLabel(CH.Permissions:PlayerRole()))
         if online and total then
             lines[#lines + 1] = (L["Online: |cffffffff%d|r of %d members"]):format(online, total)
         else
             lines[#lines + 1] = L["Loading roster..."]
         end
     else
-        lines[#lines + 1] = L["You are not in a guild. GuildHub's shared features need a guild."]
+        lines[#lines + 1] = L["You are not in a guild. Casual Hub's shared features need a guild."]
     end
     frame.guildCard.body:SetText(table.concat(lines, "\n"))
 
     local motd = guildName and GetGuildRosterMOTD and GetGuildRosterMOTD()
-    if type(motd) ~= "string" or GH.Compat.IsSecret(motd) or motd == "" then
+    if type(motd) ~= "string" or CH.Compat.IsSecret(motd) or motd == "" then
         motd = "|cff999999" .. L["No message of the day."] .. "|r"
     end
     frame.motdCard.body:SetText(motd)
@@ -50,7 +50,7 @@ end
 
 function Dashboard:Build(frame)
     self.frame = frame
-    local y = GH.UI:PageHeader(frame, L["Dashboard"], L["What's happening in your guild"])
+    local y = CH.UI:PageHeader(frame, L["Dashboard"], L["What's happening in your guild"])
 
     local function card(title, height)
         local c = W.Card(frame, title)
@@ -84,21 +84,21 @@ function Dashboard:OnShow()
     self:Refresh()
 end
 
-GH:RegisterModule(MODULE, {
+CH:RegisterModule(MODULE, {
     version = "0.1.0",
     description = L["Home screen with guild summary"],
     initialize = function()
-        GH.UI:RegisterPage("dashboard", {
+        CH.UI:RegisterPage("dashboard", {
             build = function(frame) Dashboard:Build(frame) end,
             onShow = function() Dashboard:OnShow() end,
         })
         local refresh = function() Dashboard:Refresh() end
-        GH.Events:RegisterGameEvent("GUILD_ROSTER_UPDATE", MODULE, refresh)
-        GH.Events:RegisterGameEvent("GUILD_MOTD", MODULE, refresh)
-        GH.Events:Subscribe("GUILD_CHANGED", MODULE, refresh)
+        CH.Events:RegisterGameEvent("GUILD_ROSTER_UPDATE", MODULE, refresh)
+        CH.Events:RegisterGameEvent("GUILD_MOTD", MODULE, refresh)
+        CH.Events:Subscribe("GUILD_CHANGED", MODULE, refresh)
     end,
     shutdown = function()
-        GH.Events:UnregisterGameEvent("GUILD_ROSTER_UPDATE", MODULE)
-        GH.Events:UnregisterGameEvent("GUILD_MOTD", MODULE)
+        CH.Events:UnregisterGameEvent("GUILD_ROSTER_UPDATE", MODULE)
+        CH.Events:UnregisterGameEvent("GUILD_MOTD", MODULE)
     end,
 })

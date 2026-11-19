@@ -1,16 +1,20 @@
 -- Namespace, client capability checks, logging and protected calls.
 -- See docs/forever-compat.md for the client facts these checks are based on.
-local ADDON_NAME, GH = ...
+local ADDON_NAME, CH = ...
 
-_G.GuildHub = GH  -- for /run debugging; modules use the private namespace, not this global
-GH.name = ADDON_NAME
-GH.version = (C_AddOns and C_AddOns.GetAddOnMetadata and C_AddOns.GetAddOnMetadata(ADDON_NAME, "Version")) or "dev"
+_G.CasualHub = CH  -- for /run debugging; modules use the private namespace, not this global
+CH.name = ADDON_NAME
+CH.version = (C_AddOns and C_AddOns.GetAddOnMetadata and C_AddOns.GetAddOnMetadata(ADDON_NAME, "Version")) or "dev"
 
-GH.GOLD = { r = 0.83, g = 0.69, b = 0.22, hex = "ffd4af37" }
+CH.GOLD = { r = 0.83, g = 0.69, b = 0.22, hex = "ffd4af37" }
 
-function GH:Print(msg, ...)
+-- CasualBot artwork (docs/CasualBot_Discord_Icon_1024.png, converted by tools/png2tga.py). Round, transparent corners.
+CH.ICON = "Interface\\AddOns\\" .. ADDON_NAME .. "\\Media\\icon64.tga"
+CH.ICON_LARGE = "Interface\\AddOns\\" .. ADDON_NAME .. "\\Media\\icon256.tga"
+
+function CH:Print(msg, ...)
     if select("#", ...) > 0 then msg = msg:format(...) end
-    DEFAULT_CHAT_FRAME:AddMessage("|c" .. GH.GOLD.hex .. "GuildHub|r: " .. tostring(msg))
+    DEFAULT_CHAT_FRAME:AddMessage("|c" .. CH.GOLD.hex .. "Casual Hub|r: " .. tostring(msg))
 end
 
 ---------------------------------------------------------------------------
@@ -18,7 +22,7 @@ end
 ---------------------------------------------------------------------------
 
 local Compat = {}
-GH.Compat = Compat
+CH.Compat = Compat
 
 do
     local buildVersion, buildNumber, _, interface = GetBuildInfo()
@@ -76,7 +80,7 @@ end
 ---------------------------------------------------------------------------
 
 local Log = { entries = {}, max = 300, pendingErrors = {}, persisted = nil, maxPersisted = 50 }
-GH.Log = Log
+CH.Log = Log
 
 local function formatMessage(msg, ...)
     if select("#", ...) == 0 then return tostring(msg) end
@@ -90,14 +94,14 @@ function Log:Add(level, msg, ...)
     entries[#entries + 1] = entry
     if #entries > self.max then table.remove(entries, 1) end
     if level == "error" then self:Persist(entry) end
-    if level == "debug" and GH.Settings and GH.Settings:Get("debug") then
-        GH:Print("|cff999999[debug]|r %s", entry.msg)
+    if level == "debug" and CH.Settings and CH.Settings:Get("debug") then
+        CH:Print("|cff999999[debug]|r %s", entry.msg)
     end
     return entry
 end
 
 function Log:Persist(entry)
-    local record = { t = entry.t, msg = entry.msg, version = GH.version }
+    local record = { t = entry.t, msg = entry.msg, version = CH.version }
     if not self.persisted then
         self.pendingErrors[#self.pendingErrors + 1] = record
         return
@@ -134,15 +138,15 @@ end
 local unpack = unpack or table.unpack
 
 -- Returns true plus results, or false plus the error. A nil fn counts as success.
-function GH.SafeCall(label, fn, ...)
+function CH.SafeCall(label, fn, ...)
     if fn == nil then return true end
     local args = { n = select("#", ...), ... }
     local results = { xpcall(function() return fn(unpack(args, 1, args.n)) end, errorHandler) }
     if not results[1] then
         Log:Error("%s: %s", tostring(label), tostring(results[2]))
-        if not GH.errorNotified then
-            GH.errorNotified = true
-            GH:Print("an error occurred (%s). Type /gh diag for details.", tostring(label))
+        if not CH.errorNotified then
+            CH.errorNotified = true
+            CH:Print("an error occurred (%s). Type /chub diag for details.", tostring(label))
         end
     end
     return unpack(results, 1, table.maxn(results))

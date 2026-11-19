@@ -1,6 +1,6 @@
 -- Module registry. Modules talk to each other only through core services and events (design doc §6).
 --
--- GH:RegisterModule(name, {
+-- CH:RegisterModule(name, {
 --     version = "1.0",
 --     description = "...",
 --     dependencies = { "OtherModule" },   -- initialized first; a missing or failed dependency blocks this module
@@ -9,17 +9,17 @@
 --     initialize = function(module) end,   -- at PLAYER_LOGIN, protected
 --     shutdown = function(module) end,     -- at PLAYER_LOGOUT, protected
 -- })
-local _, GH = ...
+local _, CH = ...
 
 local Modules = { list = {}, byName = {} }
-GH.Modules = Modules
+CH.Modules = Modules
 
 -- States: registered -> running | disabled | unsupported | blocked | failed
 function Modules:Register(name, spec)
     assert(type(name) == "string" and name ~= "", "module name required")
     spec = spec or {}
     if self.byName[name] then
-        GH.Log:Error("module %s registered twice; keeping the first", name)
+        CH.Log:Error("module %s registered twice; keeping the first", name)
         return self.byName[name]
     end
     local module = {
@@ -38,7 +38,7 @@ function Modules:Register(name, spec)
     return module
 end
 
-function GH:RegisterModule(name, spec)
+function CH:RegisterModule(name, spec)
     return Modules:Register(name, spec)
 end
 
@@ -51,12 +51,12 @@ function Modules:InitializeAll()
             return false
         end
         visiting[m.name] = true
-        if not m.required and not GH.Settings:IsModuleEnabled(m.name) then
+        if not m.required and not CH.Settings:IsModuleEnabled(m.name) then
             m.state, m.reason = "disabled", "disabled in settings"
             return false
         end
         for _, path in ipairs(m.requires) do
-            if not GH.Compat.Has(path) then
+            if not CH.Compat.Has(path) then
                 m.state, m.reason = "unsupported", "client lacks " .. path
                 return false
             end
@@ -68,7 +68,7 @@ function Modules:InitializeAll()
                 return false
             end
         end
-        local ok, err = GH.SafeCall("initialize " .. m.name, m.initialize, m)
+        local ok, err = CH.SafeCall("initialize " .. m.name, m.initialize, m)
         if ok then
             m.state = "running"
         else
@@ -78,15 +78,15 @@ function Modules:InitializeAll()
     end
     for _, m in ipairs(self.list) do init(m) end
     for _, m in ipairs(self.list) do
-        if m.state ~= "running" then GH.Log:Info("module %s: %s (%s)", m.name, m.state, tostring(m.reason)) end
+        if m.state ~= "running" then CH.Log:Info("module %s: %s (%s)", m.name, m.state, tostring(m.reason)) end
     end
-    GH.Events:Publish("MODULES_READY")
+    CH.Events:Publish("MODULES_READY")
 end
 
 function Modules:ShutdownAll()
     for i = #self.list, 1, -1 do
         local m = self.list[i]
-        if m.state == "running" then GH.SafeCall("shutdown " .. m.name, m.shutdown, m) end
+        if m.state == "running" then CH.SafeCall("shutdown " .. m.name, m.shutdown, m) end
     end
 end
 

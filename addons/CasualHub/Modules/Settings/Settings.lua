@@ -1,7 +1,7 @@
 -- Settings page (in the main window) plus a small entry in Blizzard's Settings > AddOns list.
-local _, GH = ...
-local L = GH.L
-local W = GH.Widgets
+local _, CH = ...
+local L = CH.L
+local W = CH.Widgets
 
 local SettingsPage = {}
 local MODULE = "Settings"
@@ -10,8 +10,8 @@ local function formatScale(v) return ("%d%%"):format(math.floor(v * 100 + 0.5)) 
 
 function SettingsPage:Build(frame)
     self.frame = frame
-    local y = GH.UI:PageHeader(frame, L["Settings"], L["Saved for your account; applies to every character."])
-    local S = GH.Settings
+    local y = CH.UI:PageHeader(frame, L["Settings"], L["Saved for your account; applies to every character."])
+    local S = CH.Settings
 
     -- Appearance -------------------------------------------------------------
     local appearance = W.Card(frame, L["Window"])
@@ -26,11 +26,11 @@ function SettingsPage:Build(frame)
     frame.lock = W.Checkbox(appearance, L["Lock window position and size"], nil, function(v) S:Set("lockWindow", v) end)
     frame.lock:SetPoint("TOPLEFT", 12, -84)
     frame.minimap = W.Checkbox(appearance, L["Show minimap button"],
-        L["GuildHub is also in the addon menu (the button under the minimap) whether or not this is on."],
+        L["Casual Hub is also in the addon menu (the button under the minimap) whether or not this is on."],
         function(v) S:Set("minimap.show", v) end)
     frame.minimap:SetPoint("TOPLEFT", 12, -110)
 
-    local reset = W.Button(appearance, L["Reset position"], 130, function() GH.UI:ResetPosition() end)
+    local reset = W.Button(appearance, L["Reset position"], 130, function() CH.UI:ResetPosition() end)
     reset:SetPoint("TOPRIGHT", -14, -34)
 
     -- Modules ----------------------------------------------------------------
@@ -40,11 +40,11 @@ function SettingsPage:Build(frame)
     modules.body:SetText("|cff999999" .. L["Turn sections on or off. Changes apply after a UI reload."] .. "|r")
     frame.moduleChecks = {}
     local row = 0
-    for _, m in ipairs(GH.Modules.list) do
+    for _, m in ipairs(CH.Modules.list) do
         if not m.required then
             row = row + 1
             local cb = W.Checkbox(modules, m.name, m.description, function(v)
-                GH.Settings:SetModuleEnabled(m.name, v)
+                CH.Settings:SetModuleEnabled(m.name, v)
                 SettingsPage:RefreshReloadHint()
             end)
             cb:SetPoint("TOPLEFT", 12, -50 - (row - 1) * 26)
@@ -64,16 +64,16 @@ function SettingsPage:Build(frame)
     diag:SetPoint("TOPLEFT", modules, "BOTTOMLEFT", 0, -12)
     diag:SetPoint("RIGHT", frame, "RIGHT", -20, 0)
     diag:SetHeight(96)
-    diag.body:SetText(("|cff999999GuildHub %s  |  %s %s|r"):format(tostring(GH.version),
-        tostring(GH.Compat.buildVersion), tostring(GH.Compat.buildNumber)))
+    diag.body:SetText(("|cff999999Casual Hub %s  |  %s %s|r"):format(tostring(CH.version),
+        tostring(CH.Compat.buildVersion), tostring(CH.Compat.buildNumber)))
     frame.debug = W.Checkbox(diag, L["Debug logging in chat"], L["Prints internal log messages to your chat frame."],
         function(v) S:Set("debug", v) end)
     frame.debug:SetPoint("TOPLEFT", 12, -56)
-    local open = W.Button(diag, L["Open diagnostics"], 140, function() GH.Diagnostics:Show() end)
+    local open = W.Button(diag, L["Open diagnostics"], 140, function() CH.Diagnostics:Show() end)
     open:SetPoint("TOPRIGHT", -14, -10)
     local clear = W.Button(diag, L["Clear saved errors"], 140, function()
-        GH.Diagnostics:ClearErrors()
-        GH:Print(L["saved errors cleared"])
+        CH.Diagnostics:ClearErrors()
+        CH:Print(L["saved errors cleared"])
     end)
     clear:SetPoint("TOPRIGHT", open, "BOTTOMRIGHT", 0, -6)
 end
@@ -87,7 +87,7 @@ function SettingsPage:RefreshReloadHint()
     local frame = self.frame
     local pending = false
     for _, cb in ipairs(frame.moduleChecks) do
-        local wanted = GH.Settings:IsModuleEnabled(cb.module.name)
+        local wanted = CH.Settings:IsModuleEnabled(cb.module.name)
         local active = cb.module.state == "running"
         if wanted ~= active and cb.module.state ~= "unsupported" and cb.module.state ~= "failed" then pending = true end
     end
@@ -95,7 +95,7 @@ function SettingsPage:RefreshReloadHint()
 end
 
 function SettingsPage:OnShow()
-    local frame, S = self.frame, GH.Settings
+    local frame, S = self.frame, CH.Settings
     frame.scale:SetValue(S:Get("scale"))
     frame.lock:SetChecked(S:Get("lockWindow"))
     frame.minimap:SetChecked(S:Get("minimap.show"))
@@ -107,32 +107,32 @@ function SettingsPage:OnShow()
     self:RefreshReloadHint()
 end
 
--- Blizzard Settings > AddOns entry that opens the GuildHub window.
+-- Blizzard Settings > AddOns entry that opens the Casual Hub window.
 local function registerBlizzardCategory()
     if not (Settings and Settings.RegisterCanvasLayoutCategory and Settings.RegisterAddOnCategory) then return end
     local panel = CreateFrame("Frame")
-    local heading = W.Heading(panel, "GuildHub")
+    local heading = W.Heading(panel, "Casual Hub")
     heading:SetPoint("TOPLEFT", 16, -16)
-    local text = W.Label(panel, L["GuildHub's options live in its own window."], "GameFontHighlight")
+    local text = W.Label(panel, L["Casual Hub's options live in its own window."], "GameFontHighlight")
     text:SetPoint("TOPLEFT", heading, "BOTTOMLEFT", 0, -10)
-    local open = W.Button(panel, L["Open GuildHub settings"], 200, function()
+    local open = W.Button(panel, L["Open Casual Hub settings"], 200, function()
         if SettingsPanel and SettingsPanel:IsShown() and HideUIPanel then HideUIPanel(SettingsPanel) end
-        GH.UI:Show("settings")
+        CH.UI:Show("settings")
     end)
     open:SetPoint("TOPLEFT", text, "BOTTOMLEFT", 0, -12)
-    local category = Settings.RegisterCanvasLayoutCategory(panel, "GuildHub")
+    local category = Settings.RegisterCanvasLayoutCategory(panel, "Casual Hub")
     Settings.RegisterAddOnCategory(category)
 end
 
-GH:RegisterModule(MODULE, {
+CH:RegisterModule(MODULE, {
     version = "0.1.0",
     required = true,
     description = L["Addon settings"],
     initialize = function()
-        GH.UI:RegisterPage("settings", {
+        CH.UI:RegisterPage("settings", {
             build = function(frame) SettingsPage:Build(frame) end,
             onShow = function() SettingsPage:OnShow() end,
         })
-        GH.SafeCall("register Blizzard settings", registerBlizzardCategory)
+        CH.SafeCall("register Blizzard settings", registerBlizzardCategory)
     end,
 })

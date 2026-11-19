@@ -1,9 +1,9 @@
 -- Sidebar sections (design doc §5). A section without a registered page shows its roadmap placeholder,
--- so later phases only need to call GH.UI:RegisterPage(id, spec).
-local _, GH = ...
-local L = GH.L
+-- so later phases only need to call CH.UI:RegisterPage(id, spec).
+local _, CH = ...
+local L = CH.L
 
-GH.NAVIGATION = {
+CH.NAVIGATION = {
     { id = "dashboard", title = L["Dashboard"], icon = "Interface\\Icons\\INV_Misc_Note_01" },
     { id = "members", title = L["Members"], icon = "Interface\\Icons\\INV_Misc_Head_Human_01", phase = 2,
         summary = L["Searchable roster with opt-in profiles: main/alt links, preferred roles, interests and availability."] },
@@ -18,8 +18,8 @@ GH.NAVIGATION = {
     { id = "settings", title = L["Settings"], icon = "Interface\\Icons\\INV_Misc_Gear_01" },
 }
 
-function GH.NavigationEntry(id)
-    for _, entry in ipairs(GH.NAVIGATION) do
+function CH.NavigationEntry(id)
+    for _, entry in ipairs(CH.NAVIGATION) do
         if entry.id == id then return entry end
     end
 end

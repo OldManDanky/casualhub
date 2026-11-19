@@ -1,11 +1,11 @@
 -- Shared widget constructors: dark fantasy panels with gold accents (design doc §2, §5).
-local _, GH = ...
-local L = GH.L
+local _, CH = ...
+local L = CH.L
 
 local W = {}
-GH.Widgets = W
+CH.Widgets = W
 
-local GOLD = GH.GOLD
+local GOLD = CH.GOLD
 W.COLORS = {
     panel = { 0.06, 0.05, 0.07, 0.96 },
     inset = { 0.10, 0.09, 0.11, 0.90 },
@@ -73,7 +73,7 @@ function W.Button(parent, text, width, onClick)
     local b = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
     b:SetSize(width or 120, 22)
     b:SetText(text)
-    if onClick then b:SetScript("OnClick", function(self, button) GH.SafeCall("button " .. text, onClick, self, button) end) end
+    if onClick then b:SetScript("OnClick", function(self, button) CH.SafeCall("button " .. text, onClick, self, button) end) end
     return b
 end
 
@@ -86,7 +86,7 @@ function W.Checkbox(parent, text, tooltip, onToggle)
     cb:SetHitRectInsets(0, -(label:GetStringWidth() + 8), 0, 0)
     if tooltip then W.Tooltip(cb, text, tooltip) end
     cb:SetScript("OnClick", function(self)
-        if onToggle then GH.SafeCall("checkbox " .. text, onToggle, self:GetChecked() and true or false) end
+        if onToggle then CH.SafeCall("checkbox " .. text, onToggle, self:GetChecked() and true or false) end
     end)
     return cb
 end
@@ -128,7 +128,7 @@ function W.Slider(parent, text, minValue, maxValue, step, formatValue, onCommit)
         local v = rounded(self:GetValue())
         if v ~= self.committed then
             self.committed = v
-            if onCommit then GH.SafeCall("slider " .. text, onCommit, v) end
+            if onCommit then CH.SafeCall("slider " .. text, onCommit, v) end
         end
     end
     s:SetScript("OnValueChanged", function(self, v)
@@ -172,7 +172,7 @@ end
 local copyDialog
 function W.CopyDialog(title, text)
     if not copyDialog then
-        local f = W.CreatePanel(UIParent, W.COLORS.panel, 1, "GuildHubCopyDialog")
+        local f = W.CreatePanel(UIParent, W.COLORS.panel, 1, "CasualHubCopyDialog")
         f:SetSize(760, 520)
         f:SetPoint("CENTER")
         f:SetFrameStrata("DIALOG")
@@ -183,7 +183,7 @@ function W.CopyDialog(title, text)
         f:RegisterForDrag("LeftButton")
         f:SetScript("OnDragStart", f.StartMoving)
         f:SetScript("OnDragStop", f.StopMovingOrSizing)
-        tinsert(UISpecialFrames, "GuildHubCopyDialog")
+        tinsert(UISpecialFrames, "CasualHubCopyDialog")
 
         f.heading = W.Heading(f, "")
         f.heading:SetPoint("TOPLEFT", 16, -14)

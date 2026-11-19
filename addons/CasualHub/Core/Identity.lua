@@ -4,10 +4,10 @@
 -- senders, GetUnitName), and UnitName("player") returns "First", "Last" (surname in Retail's realm slot).
 -- First names are not unique, so the canonical character key is the full "First Last" name.
 -- Whisper targets accept "First Last" and "First-Last" but not "First" alone.
-local _, GH = ...
+local _, CH = ...
 
 local Identity = {}
-GH.Identity = Identity
+CH.Identity = Identity
 
 local function trim(s)
     return (s:gsub("^%s+", ""):gsub("%s+$", ""))
@@ -15,9 +15,9 @@ end
 
 -- Canonical character key, or nil for unusable input (nil, secret, empty, "Unknown").
 function Identity:Normalize(name)
-    if type(name) ~= "string" or GH.Compat.IsSecret(name) then return nil end
+    if type(name) ~= "string" or CH.Compat.IsSecret(name) then return nil end
     name = trim(name)
-    if GH.Compat.isForever then
+    if CH.Compat.isForever then
         -- "First-Last" (whisper/WTF spelling) and "First Last" refer to the same character.
         name = name:gsub("%-", " ")
     end
@@ -32,7 +32,7 @@ function Identity:PlayerKey()
     if not key or key == "" then
         local first, second = UnitName("player")
         if second and second ~= "" then
-            key = first .. (GH.Compat.isForever and " " or "-") .. second
+            key = first .. (CH.Compat.isForever and " " or "-") .. second
         else
             key = first
         end

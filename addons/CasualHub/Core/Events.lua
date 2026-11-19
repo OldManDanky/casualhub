@@ -1,9 +1,9 @@
 -- Internal publish/subscribe bus plus a single game-event frame.
 -- Handlers are keyed by an owner string (normally the module name) and receive the event's arguments only.
-local _, GH = ...
+local _, CH = ...
 
 local Events = { handlers = {}, game = {}, unsupported = {} }
-GH.Events = Events
+CH.Events = Events
 
 local function dispatch(list, label, ...)
     if not list then return end
@@ -11,7 +11,7 @@ local function dispatch(list, label, ...)
     local snapshot = {}
     for owner, fn in pairs(list) do snapshot[#snapshot + 1] = { owner, fn } end
     for _, pair in ipairs(snapshot) do
-        GH.SafeCall(label .. " -> " .. tostring(pair[1]), pair[2], ...)
+        CH.SafeCall(label .. " -> " .. tostring(pair[1]), pair[2], ...)
     end
 end
 
@@ -44,7 +44,7 @@ function Events:RegisterGameEvent(event, owner, fn)
         local ok, err = pcall(frame.RegisterEvent, frame, event)
         if not ok then
             self.unsupported[event] = tostring(err)
-            GH.Log:Warn("game event %s is not supported by this client", event)
+            CH.Log:Warn("game event %s is not supported by this client", event)
             return false
         end
         list = {}

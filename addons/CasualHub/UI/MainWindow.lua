@@ -1,12 +1,12 @@
 -- Main window: title bar, left sidebar navigation, page workspace (design doc §5).
 -- Movable, resizable, scalable; position, size and last page persist in settings.
-local _, GH = ...
-local L = GH.L
-local W = GH.Widgets
-local GOLD = GH.GOLD
+local _, CH = ...
+local L = CH.L
+local W = CH.Widgets
+local GOLD = CH.GOLD
 
 local UI = { pages = {}, pageFrames = {}, navButtons = {} }
-GH.UI = UI
+CH.UI = UI
 
 local SIDEBAR_WIDTH = 176
 local TITLE_HEIGHT = 44
@@ -23,7 +23,7 @@ function UI:RegisterPage(id, spec)
 end
 
 function UI:HasPage(id)
-    return GH.NavigationEntry(id) ~= nil
+    return CH.NavigationEntry(id) ~= nil
 end
 
 -- Standard page header: title, optional subtitle, gold rule. Returns the y offset below it.
@@ -65,7 +65,7 @@ end
 local function savePosition(win)
     local point, _, relativePoint, x, y = win:GetPoint(1)
     if not point then return end
-    local s = GH.Settings
+    local s = CH.Settings
     s:Set("window.point", point)
     s:Set("window.relativePoint", relativePoint)
     s:Set("window.x", math.floor(x + 0.5))
@@ -74,7 +74,7 @@ end
 
 local function applyPosition(win)
     win:ClearAllPoints()
-    local s = GH.Settings
+    local s = CH.Settings
     local point = s:Get("window.point")
     if type(point) == "string" then
         win:SetPoint(point, UIParent, s:Get("window.relativePoint") or point, s:Get("window.x") or 0, s:Get("window.y") or 0)
@@ -130,7 +130,7 @@ end
 
 function UI:Create()
     if self.window then return self.window end
-    local win = W.CreatePanel(UIParent, W.COLORS.panel, 1, "GuildHubMainFrame")
+    local win = W.CreatePanel(UIParent, W.COLORS.panel, 1, "CasualHubMainFrame")
     self.window = win
     win:Hide()
     win:SetFrameStrata("HIGH")
@@ -144,10 +144,10 @@ function UI:Create()
     elseif win.SetMinResize then
         win:SetMinResize(MIN_W, MIN_H)
     end
-    win:SetSize(clampSize(GH.Settings:Get("window.width"), GH.Settings:Get("window.height")))
-    win:SetScale(GH.Settings:Get("scale"))
+    win:SetSize(clampSize(CH.Settings:Get("window.width"), CH.Settings:Get("window.height")))
+    win:SetScale(CH.Settings:Get("scale"))
     applyPosition(win)
-    tinsert(UISpecialFrames, "GuildHubMainFrame")
+    tinsert(UISpecialFrames, "CasualHubMainFrame")
 
     -- Title bar (drag handle)
     local titleBar = CreateFrame("Frame", nil, win)
@@ -157,18 +157,17 @@ function UI:Create()
     titleBar:EnableMouse(true)
     titleBar:RegisterForDrag("LeftButton")
     titleBar:SetScript("OnDragStart", function()
-        if not GH.Settings:Get("lockWindow") then win:StartMoving() end
+        if not CH.Settings:Get("lockWindow") then win:StartMoving() end
     end)
     titleBar:SetScript("OnDragStop", function()
         win:StopMovingOrSizing()
         savePosition(win)
     end)
     local crest = titleBar:CreateTexture(nil, "ARTWORK")
-    crest:SetSize(26, 26)
-    crest:SetPoint("LEFT", 10, 0)
-    crest:SetTexture("Interface\\Icons\\Ability_Warrior_BattleShout")
-    crest:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-    local title = W.Heading(titleBar, "GuildHub")
+    crest:SetSize(34, 34)
+    crest:SetPoint("LEFT", 6, 0)
+    crest:SetTexture(CH.ICON)
+    local title = W.Heading(titleBar, "Casual Hub")
     title:SetPoint("LEFT", crest, "RIGHT", 8, 0)
     win.guildLabel = W.Label(titleBar, "", "GameFontHighlight", W.COLORS.muted)
     win.guildLabel:SetPoint("LEFT", title, "RIGHT", 12, -1)
@@ -183,10 +182,10 @@ function UI:Create()
     sidebar:SetPoint("TOPLEFT", 4, -TITLE_HEIGHT - 1)
     sidebar:SetPoint("BOTTOMLEFT", 4, 4)
     sidebar:SetWidth(SIDEBAR_WIDTH)
-    for i, entry in ipairs(GH.NAVIGATION) do
+    for i, entry in ipairs(CH.NAVIGATION) do
         self.navButtons[entry.id] = createNavButton(sidebar, entry, i)
     end
-    local version = W.Label(sidebar, "v" .. tostring(GH.version), "GameFontDisableSmall")
+    local version = W.Label(sidebar, "v" .. tostring(CH.version), "GameFontDisableSmall")
     version:SetPoint("BOTTOMLEFT", 12, 10)
 
     -- Workspace
@@ -204,38 +203,38 @@ function UI:Create()
     grip:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
     grip:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
     grip:SetScript("OnMouseDown", function()
-        if not GH.Settings:Get("lockWindow") then win:StartSizing("BOTTOMRIGHT") end
+        if not CH.Settings:Get("lockWindow") then win:StartSizing("BOTTOMRIGHT") end
     end)
     grip:SetScript("OnMouseUp", function()
         win:StopMovingOrSizing()
         local w, h = clampSize(win:GetSize())
-        GH.Settings:Set("window.width", math.floor(w + 0.5))
-        GH.Settings:Set("window.height", math.floor(h + 0.5))
+        CH.Settings:Set("window.width", math.floor(w + 0.5))
+        CH.Settings:Set("window.height", math.floor(h + 0.5))
         savePosition(win)
     end)
     win.grip = grip
 
     win:SetScript("OnShow", function()
         UI:RefreshHeader()
-        GH.Events:Publish("WINDOW_SHOWN")
+        CH.Events:Publish("WINDOW_SHOWN")
     end)
     win:SetScript("OnHide", function()
         local spec = UI.currentPage and UI.pages[UI.currentPage]
         if spec and spec.onHide and UI.pageFrames[UI.currentPage] then
-            GH.SafeCall("page hide " .. UI.currentPage, spec.onHide, UI.pageFrames[UI.currentPage])
+            CH.SafeCall("page hide " .. UI.currentPage, spec.onHide, UI.pageFrames[UI.currentPage])
         end
-        GH.Events:Publish("WINDOW_HIDDEN")
+        CH.Events:Publish("WINDOW_HIDDEN")
     end)
 
-    GH.Events:Subscribe("SETTING_CHANGED", "UI", function(path, value)
+    CH.Events:Subscribe("SETTING_CHANGED", "UI", function(path, value)
         if path == "scale" then
             win:SetScale(value)
         elseif path == "lockWindow" then
             grip:SetShown(not value)
         end
     end)
-    GH.Events:Subscribe("GUILD_CHANGED", "UI", function() UI:RefreshHeader() end)
-    grip:SetShown(not GH.Settings:Get("lockWindow"))
+    CH.Events:Subscribe("GUILD_CHANGED", "UI", function() UI:RefreshHeader() end)
+    grip:SetShown(not CH.Settings:Get("lockWindow"))
 
     self:RefreshNav()
     return win
@@ -243,7 +242,7 @@ end
 
 function UI:RefreshHeader()
     if not self.window then return end
-    local guild = GH.Identity:GuildName()
+    local guild = CH.Identity:GuildName()
     self.window.guildLabel:SetText(guild or L["no guild"])
 end
 
@@ -262,10 +261,10 @@ function UI:RefreshNav()
 end
 
 function UI:SelectPage(id)
-    local entry = GH.NavigationEntry(id)
-    if not entry then id, entry = "dashboard", GH.NavigationEntry("dashboard") end
+    local entry = CH.NavigationEntry(id)
+    if not entry then id, entry = "dashboard", CH.NavigationEntry("dashboard") end
     -- A disabled Dashboard module has no page; fall back to Settings rather than a blank placeholder.
-    if id == "dashboard" and not self.pages.dashboard then id, entry = "settings", GH.NavigationEntry("settings") end
+    if id == "dashboard" and not self.pages.dashboard then id, entry = "settings", CH.NavigationEntry("settings") end
     self:Create()
 
     local previous = self.currentPage
@@ -274,7 +273,7 @@ function UI:SelectPage(id)
         local spec = self.pages[previous]
         if frame then
             frame:Hide()
-            if spec and spec.onHide then GH.SafeCall("page hide " .. previous, spec.onHide, frame) end
+            if spec and spec.onHide then CH.SafeCall("page hide " .. previous, spec.onHide, frame) end
         end
     end
 
@@ -285,15 +284,15 @@ function UI:SelectPage(id)
         frame:SetAllPoints()
         self.pageFrames[id] = frame
         if spec and spec.build then
-            GH.SafeCall("page build " .. id, spec.build, frame)
+            CH.SafeCall("page build " .. id, spec.build, frame)
         else
             buildPlaceholder(frame, entry)
         end
     end
     frame:Show()
     self.currentPage = id
-    GH.Settings:Set("lastPage", id)
-    if spec and spec.onShow then GH.SafeCall("page show " .. id, spec.onShow, frame) end
+    CH.Settings:Set("lastPage", id)
+    if spec and spec.onShow then CH.SafeCall("page show " .. id, spec.onShow, frame) end
     self:RefreshNav()
 end
 
@@ -301,7 +300,7 @@ function UI:Show(pageId)
     local win = self:Create()
     -- Show first so the page's onShow sees a visible frame.
     win:Show()
-    self:SelectPage(pageId or self.currentPage or GH.Settings:Get("lastPage"))
+    self:SelectPage(pageId or self.currentPage or CH.Settings:Get("lastPage"))
 end
 
 function UI:Hide()
@@ -318,8 +317,8 @@ end
 
 function UI:ResetPosition()
     for _, key in ipairs({ "point", "relativePoint", "x", "y" }) do
-        GH.Settings:Set("window." .. key, nil)
+        CH.Settings:Set("window." .. key, nil)
     end
     if self.window then applyPosition(self.window) end
-    GH:Print(L["window position reset"])
+    CH:Print(L["window position reset"])
 end

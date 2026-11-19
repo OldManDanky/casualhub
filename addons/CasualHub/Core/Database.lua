@@ -1,12 +1,12 @@
 -- SavedVariables persistence: schema migrations, settings with defaults, and namespaced record storage.
 --
--- GuildHubDB (account):  { schemaVersion, settings, data = { account = {ns...}, guilds = { [guildKey] = {ns...} } },
+-- CasualHubDB (account):  { schemaVersion, settings, data = { account = {ns...}, guilds = { [guildKey] = {ns...} } },
 --                          diagnostics = { errors } }
--- GuildHubCharDB (char): { schemaVersion, data = {ns...} }
-local _, GH = ...
+-- CasualHubCharDB (char): { schemaVersion, data = {ns...} }
+local _, CH = ...
 
 local Store = { namespaces = {}, migrations = {}, readOnly = false }
-GH.Store = Store
+CH.Store = Store
 
 Store.SCHEMA_VERSION = 1
 
@@ -62,12 +62,12 @@ local function asTable(value)
 end
 
 function Store:Init()
-    local db, charDb = GuildHubDB, GuildHubCharDB
+    local db, charDb = CasualHubDB, CasualHubCharDB
     if db ~= nil and type(db) ~= "table" then
-        GH.Log:Warn("account saved data was not a table; starting fresh")
+        CH.Log:Warn("account saved data was not a table; starting fresh")
     end
     if charDb ~= nil and type(charDb) ~= "table" then
-        GH.Log:Warn("character saved data was not a table; starting fresh")
+        CH.Log:Warn("character saved data was not a table; starting fresh")
     end
     db, charDb = asTable(db), asTable(charDb)
     if type(db.schemaVersion) ~= "number" then db.schemaVersion = 0 end
@@ -75,13 +75,13 @@ function Store:Init()
 
     db.diagnostics = asTable(db.diagnostics)
     db.diagnostics.errors = asTable(db.diagnostics.errors)
-    GH.Log:AttachStorage(db.diagnostics.errors)
+    CH.Log:AttachStorage(db.diagnostics.errors)
 
     local version = math.max(db.schemaVersion, charDb.schemaVersion)
     if version > self.SCHEMA_VERSION then
-        -- Saved by a newer GuildHub: keep it intact and refuse to write records.
+        -- Saved by a newer Casual Hub: keep it intact and refuse to write records.
         self.readOnly = true
-        GH.Log:Warn("saved data uses schema %d but this version understands %d; record storage is read-only",
+        CH.Log:Warn("saved data uses schema %d but this version understands %d; record storage is read-only",
             version, self.SCHEMA_VERSION)
     else
         self:Migrate(db, charDb, self.SCHEMA_VERSION)
@@ -90,14 +90,14 @@ function Store:Init()
     local repaired = {}
     db.settings = sanitize(db.settings, DEFAULT_SETTINGS, "", repaired)
     if #repaired > 0 then
-        GH.Log:Warn("reset invalid settings: %s", table.concat(repaired, ", "))
+        CH.Log:Warn("reset invalid settings: %s", table.concat(repaired, ", "))
     end
     db.data = asTable(db.data)
     db.data.account = asTable(db.data.account)
     db.data.guilds = asTable(db.data.guilds)
     charDb.data = asTable(charDb.data)
 
-    GuildHubDB, GuildHubCharDB = db, charDb
+    CasualHubDB, CasualHubCharDB = db, charDb
     self.db, self.charDb = db, charDb
 end
 
@@ -106,10 +106,10 @@ function Store:Migrate(db, charDb, target)
         while t.schemaVersion < target do
             local nextVersion = t.schemaVersion + 1
             local migration = self.migrations[nextVersion]
-            local ok = GH.SafeCall("migration " .. nextVersion, migration, db, charDb)
+            local ok = CH.SafeCall("migration " .. nextVersion, migration, db, charDb)
             if not ok then
                 self.readOnly = true
-                GH.Log:Error("migration to schema %d failed; record storage is read-only", nextVersion)
+                CH.Log:Error("migration to schema %d failed; record storage is read-only", nextVersion)
                 return false
             end
             t.schemaVersion = nextVersion
@@ -139,7 +139,7 @@ function Store:Bucket(namespace, create)
     if spec.scope == "char" then
         root = self.charDb.data
     elseif spec.scope == "guild" then
-        local key = GH.Identity:GuildKey()
+        local key = CH.Identity:GuildKey()
         if not key then return nil end
         root = self.db.data.guilds[key]
         if not root then
@@ -168,7 +168,7 @@ function Store:Put(namespace, key, record)
     local bucket = self:Bucket(namespace, true)
     if not bucket then return false, "scope unavailable" end
     bucket[key] = record
-    GH.Events:Publish("STORE_CHANGED", namespace, key, record)
+    CH.Events:Publish("STORE_CHANGED", namespace, key, record)
     return true
 end
 
@@ -185,7 +185,7 @@ end
 ---------------------------------------------------------------------------
 
 local Settings = {}
-GH.Settings = Settings
+CH.Settings = Settings
 
 local function walk(root, path)
     local parent, last = root, nil
@@ -215,7 +215,7 @@ function Settings:Set(path, value)
     if not parent then return false end
     if parent[key] == value then return true end
     parent[key] = value
-    GH.Events:Publish("SETTING_CHANGED", path, value)
+    CH.Events:Publish("SETTING_CHANGED", path, value)
     return true
 end
 
