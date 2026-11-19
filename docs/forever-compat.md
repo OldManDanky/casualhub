@@ -33,6 +33,10 @@ character level 29 Hunter, Guild Master of a 55-member guild. Design doc §10 as
   "CAMWOW US2 Realm 7 PvE"), but in the next session the same guild was keyed as `CAMWOWUS1Realm7PvE`,
   most likely from `GetGuildInfo`'s realm value. Don't build persistent keys from realm names; Casual Hub
   keys guild data by guild name alone.
+- Measured 2026-11-19 in one session: `GetRealmID()` = `6933` (the same number as in the player GUID
+  `Player-6933-...`), `GetNormalizedRealmName()` = `CAMWOWUS2Realm7PvE` (the player's current instance), and
+  `GetGuildInfo` realm = `CAMWOWUS1Realm7PvE` (the guild's). `C_GameRules.IsHardcoreActive()` = false on
+  Normal. Whether 6933 identifies the ruleset or a single instance is not known yet.
 
 ## Addon messaging
 - `C_ChatInfo.RegisterAddonMessagePrefix`, `SendAddonMessage` and `SendAddonMessageLogged` work.
