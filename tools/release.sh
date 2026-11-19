@@ -3,7 +3,7 @@
 #
 #   tools/release.sh NOTES.md [AddonName]
 #
-# Checks the tree is clean and tests pass, builds dist/<Addon>-<version>.zip
+# Checks the tree is clean and tests pass, builds dist/<Addon>-<x.y.z>-forever.zip
 # (just the addon folder, ready to unzip into AddOns), tags v<version>, pushes
 # main and the tag, creates the release (pre-release when the version contains
 # alpha/beta/rc) and uploads the zip.
@@ -26,7 +26,9 @@ if [[ -z "$TOKEN" && -r "$TOKEN_FILE" ]]; then TOKEN=$(tr -d '[:space:]' < "$TOK
 
 VERSION=$(grep -m1 '^## Version:' "addons/$ADDON/$ADDON.toc" | awk '{print $3}' | tr -d '\r')
 TAG="v$VERSION"
-ZIP="dist/$ADDON-$VERSION.zip"
+# Asset name required by the Forever addon listings: <Addon>-<major.minor.patch>-forever.zip
+# (the pre-release suffix stays on the tag and release title, not the file name).
+ZIP="dist/$ADDON-${VERSION%%-*}-forever.zip"
 PRERELEASE=false; [[ "$VERSION" =~ (alpha|beta|rc) ]] && PRERELEASE=true
 
 [[ "$(git rev-parse --abbrev-ref HEAD)" == main ]] || { echo "not on main" >&2; exit 1; }
