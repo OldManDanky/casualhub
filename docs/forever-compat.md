@@ -27,6 +27,8 @@ character level 29 Hunter, Guild Master of a 55-member guild. Design doc §10 as
   members who are online, or filter that system message for whispers the addon sent.
 - `Ambiguate()` has nothing to strip here. Never split a name on its space.
 - The WTF per-character folder is named `First-Last`.
+- **Forever has no realms in the usual sense; it has rulesets:** Normal (PvE), PvP, RP-PvP and Hardcore.
+  The "realm" strings the API returns (`CAMWOWUS2Realm7PvE`) look like server instances within a ruleset.
 - **Realm names are not stable.** `GetNormalizedRealmName()` returned `CAMWOWUS2Realm7PvE` (display name
   "CAMWOW US2 Realm 7 PvE"), but in the next session the same guild was keyed as `CAMWOWUS1Realm7PvE`,
   most likely from `GetGuildInfo`'s realm value. Don't build persistent keys from realm names; Casual Hub
