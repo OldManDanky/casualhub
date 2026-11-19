@@ -474,6 +474,10 @@ scenarios.sync = function()
 
     local peer = CH.Comm:Peer("Thrall Stormrage")
     check(peer and peer.version == CH.version, "peer addon version recorded")
+    Stub.fire("PLAYER_LOGOUT")
+    local last = CasualHubDB.diagnostics.lastSession
+    check(last and last.peers["Thrall Stormrage"] == CH.version and last.comm.sentChunks > 0 and last.sync.accepted > 0,
+        "session counters and peers saved at logout")
     noErrors(CH)
     reportGlobals()
     saveTo(savedFile)

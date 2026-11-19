@@ -41,4 +41,14 @@ end)
 
 Events:RegisterGameEvent("PLAYER_LOGOUT", "Core", function()
     CH.Modules:ShutdownAll()
+    -- Keep the session's transport/sync counters so a saved file explains what happened after the fact.
+    if CH.Store.db then
+        local peers = {}
+        for name, peer in pairs(CH.Comm.peers) do peers[name] = peer.version end
+        CH.Store.db.diagnostics.lastSession = {
+            at = time(), version = CH.version, character = CH.Identity:PlayerKey(),
+            comm = CH.Store.DeepCopy(CH.Comm.stats), sync = CH.Store.DeepCopy(CH.Sync.stats),
+            peers = peers, rosterOnline = CH.Roster.onlineCount, rosterTotal = CH.Roster.total,
+        }
+    end
 end)
