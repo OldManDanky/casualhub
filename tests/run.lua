@@ -569,6 +569,156 @@ scenarios.members_ui = function()
     reportGlobals()
 end
 
+---------------------------------------------------------------------------
+-- Phase 3: Activity Board
+---------------------------------------------------------------------------
+
+scenarios.activities = function()
+    local CH = boot()
+    local A = CH.Activities
+    drain()
+    local now = Stub.serverTime
+    local id, reason = A:Create({ category = "dungeons", title = "RFC run", details = "Need a tank",
+        expiresAt = now + 6 * 3600, roles = { tank = 1, dps = 2 }, capacity = 5 })
+    Stub.advance(30)
+    local recs = sentMessages(CH, "REC")
+    check(id and id:find("^Ghazneth Strongbow#") and #recs == 1 and recs[1].b.y == "activity"
+        and recs[1].channel == "GUILD" and recs[1].b.r.title == "RFC run", "creating a request broadcasts it" .. tostring(reason or ""))
+    check(not A:Create({ category = "raids", title = "x", expiresAt = now + 3600 }), "rejects unknown category")
+    check(not A:Create({ category = "quests", title = "  ", expiresAt = now + 3600 }), "rejects empty title")
+    check(not A:Create({ category = "quests", title = "x", expiresAt = now + 3600, capacity = 1 }), "rejects group size 1")
+    check(not A:Create({ category = "quests", title = "x", expiresAt = now + 20 * 86400 }), "rejects expiry over 15 days")
+
+    drain()
+    peerSend(CH, "REC", { y = "signup", r = { id = id .. "|Thrall Stormrage", owner = "Thrall Stormrage", rev = 1,
+        updatedAt = now, activityId = id, role = "tank", state = "volunteered", note = "on my way" } })
+    local a = A:Get(id)
+    local vols = A:Volunteers(a)
+    check(#vols == 1 and vols[1].name == "Thrall Stormrage" and vols[1].role == "tank" and vols[1].note == "on my way",
+        "peer volunteers")
+    check(printedContains("Thrall Stormrage volunteered (Tank)"), "organizer told about a new volunteer")
+    peerSend(CH, "REC", { y = "signup", r = { id = id .. "|Jaina Proudmoore", owner = "Thrall Stormrage", rev = 1,
+        updatedAt = now, activityId = id, role = "dps", state = "volunteered" } })
+    check(#A:Volunteers(A:Get(id)) == 1, "signup id must match its owner")
+
+    check(A:SetAccepted(id, "Thrall Stormrage", "tank"), "organizer accepts a volunteer")
+    a = A:Get(id)
+    check(a.accepted["Thrall Stormrage"] == "tank" and A:RoleFill(a).tank == 1 and A:Volunteers(a)[1].accepted,
+        "accepted volunteer counted toward roles")
+    A:Update(id, { category = "dungeons", title = "RFC run", expiresAt = a.expiresAt, roles = a.roles, capacity = 2 })
+    check(A:EffectiveStatus(A:Get(id)) == "full", "full when the group reaches its size")
+
+    -- A guildmate's request
+    local tid = "Thrall Stormrage#abc"
+    peerSend(CH, "REC", { y = "activity", r = { id = tid, owner = "Thrall Stormrage", rev = 1, updatedAt = now,
+        category = "attunements", title = "Onyxia attune", status = "open", expiresAt = now + 86400, roles = { healer = 1 } } })
+    check(A:Get(tid) and A:Get(tid).title == "Onyxia attune", "receives a guildmate's request")
+    check(not A:SetStatus(tid, "closed"), "can't change someone else's request")
+    peerSend(CH, "REC", { y = "activity", r = { id = "Thrall Stormrage#fake", owner = "Ghazneth Ironhide", rev = 1,
+        updatedAt = now, category = "quests", title = "spoof", status = "open", expiresAt = now + 3600 } })
+    check(A:Get("Thrall Stormrage#fake") == nil, "rejects a request whose id names another organizer")
+    drain()
+    check(A:Volunteer(tid, "healer", "can heal"), "volunteer for a guildmate's request")
+    Stub.advance(30)
+    recs = sentMessages(CH, "REC")
+    check(#recs == 1 and recs[1].b.y == "signup" and recs[1].b.r.state == "volunteered" and recs[1].b.r.role == "healer",
+        "signup broadcast")
+    check(not A:Volunteer(id, "dps"), "can't volunteer for your own request")
+    peerSend(CH, "REC", { y = "activity", r = { id = tid, owner = "Thrall Stormrage", rev = 2, updatedAt = now,
+        category = "attunements", title = "Onyxia attune", status = "open", expiresAt = now + 86400, roles = { healer = 1 },
+        accepted = { ["Ghazneth Strongbow"] = "healer" } } })
+    check(printedContains("Thrall Stormrage accepted you"), "told when accepted")
+    drain()
+    A:Withdraw(tid)
+    Stub.advance(30)
+    recs = sentMessages(CH, "REC")
+    check(#recs == 1 and recs[1].b.r.state == "withdrawn", "withdraw broadcasts")
+
+    check(A:SetStatus(id, "closed") and A:EffectiveStatus(A:Get(id)) == "closed", "organizer closes")
+    check(A:SetStatus(id, "open") and A:IsActive(A:Get(id)), "and reopens")
+    Stub.advance(25 * 3600)
+    check(A:EffectiveStatus(A:Get(tid)) == "expired", "requests expire")
+    Stub.advance(8 * 86400)
+    CH.Sync:Prune()
+    check(A:Get(tid) == nil and CH.Sync:Get("signup", tid .. "|Ghazneth Strongbow") == nil,
+        "expired requests and their signups pruned after a week")
+    peerSend(CH, "REC", { y = "activity", r = { id = "Thrall Stormrage#old", owner = "Thrall Stormrage", rev = 1,
+        updatedAt = now, category = "quests", title = "stale", status = "open", expiresAt = now + 3600 } })
+    check(A:Get("Thrall Stormrage#old") == nil, "already-expired requests from peers refused")
+    local doomed = A:Create({ category = "help", title = "Delete me", expiresAt = Stub.serverTime + 3600 })
+    check(doomed and A:Delete(doomed) and A:Get(doomed) == nil and CH.Sync:Get("activity", doomed).deleted,
+        "organizer deletes (tombstone kept so it can't come back)")
+    noErrors(CH)
+    reportGlobals()
+end
+
+scenarios.activities_ui = function()
+    local CH = boot()
+    local P = CH.ActivitiesPage
+    check(select(1, P.ParseClock("20:30")) == 20 and select(2, P.ParseClock("20:30")) == 30, "parses 20:30")
+    check(P.ParseClock("8pm") == 20 and P.ParseClock("12am") == 0 and P.ParseClock("12pm") == 12 and
+        P.ParseClock("8:15 am") == 8, "parses am/pm")
+    check(P.ParseClock("25:00") == nil and P.ParseClock("8:75") == nil and P.ParseClock("13pm") == nil and
+        P.ParseClock("soon") == nil, "rejects bad times")
+
+    SlashCmdList.CASUALHUB("activities")
+    local page = CH.UI.pageFrames.activities
+    check(page and page:IsShown() and page.empty:IsShown(), "/chub activities opens an empty board")
+    P:OpenEditor(nil)
+    local ed = page.editor
+    check(ed:IsShown() and not page.list:IsShown(), "New request opens the editor")
+    ed.category.buttons.quests:RunScript("OnClick")
+    ed.title:SetText("Help with Hogger")
+    ed.day.buttons.tomorrow:RunScript("OnClick")
+    ed.clock:SetText("25:99")
+    P:SaveEditor()
+    check(ed:IsShown() and contains(ed.error:GetText(), "start time"), "bad start time rejected")
+    ed.clock:SetText("8:30pm")
+    ed.roleBoxes.dps:SetText("2")
+    P:SaveEditor()
+    local list = CH.Activities:List()
+    check(not ed:IsShown() and #list == 1 and list[1].category == "quests" and list[1].roles.dps == 2 and
+        list[1].startAt and list[1].startAt > Stub.serverTime, "request posted for tomorrow evening")
+    check(#page.list.items == 1 and P.selected == list[1].id, "new request listed and selected")
+    check(page.actionButtons[1]:IsShown() and page.actionButtons[1]:GetText() == "Edit", "organizer sees Edit")
+    check(contains(CH.UI.pageFrames.activities.detailBody:GetText(), "Quests"), "detail shows the category")
+
+    local id = list[1].id
+    peerSend(CH, "REC", { y = "signup", r = { id = id .. "|Thrall Stormrage", owner = "Thrall Stormrage", rev = 1,
+        updatedAt = Stub.serverTime, activityId = id, role = "dps", state = "volunteered" } })
+    local row = page.volunteerRows[1]
+    check(row:IsShown() and row.accept:IsShown() and contains(row.text:GetText(), "Thrall Stormrage"), "volunteer listed with Accept")
+    row.accept:RunScript("OnClick")
+    check(CH.Activities:Get(id).accepted["Thrall Stormrage"] == "dps" and page.volunteerRows[1].invite:IsShown(),
+        "Accept works; Invite offered for online accepted volunteers")
+
+    page.categoryFilter.buttons.dungeons:RunScript("OnClick")
+    check(#page.list.items == 0, "category filter")
+    page.categoryFilter.buttons.all:RunScript("OnClick")
+    check(#page.list.items == 1, "All shows everything")
+    CH.Activities:SetStatus(id, "completed")
+    P:Refresh()
+    check(#page.list.items == 0, "finished requests hidden by default")
+    page.showClosed:SetChecked(true)
+    page.showClosed:RunScript("OnClick")
+    check(#page.list.items == 1, "Show finished includes them")
+
+    peerSend(CH, "REC", { y = "activity", r = { id = "Thrall Stormrage#x1", owner = "Thrall Stormrage", rev = 1,
+        updatedAt = Stub.serverTime, category = "worldbosses", title = "Azuregos", status = "open",
+        expiresAt = Stub.serverTime + 3600, roles = { tank = 2 } } })
+    P:Select("Thrall Stormrage#x1")
+    check(page.actionButtons[1]:GetText() == "Volunteer: Tank" and page.actionButtons[2]:GetText() == "Volunteer: any",
+        "volunteer buttons per needed role")
+    page.actionButtons[1]:RunScript("OnClick")
+    local s = CH.Activities:MySignup("Thrall Stormrage#x1")
+    check(s and s.role == "tank" and page.actionButtons[1]:GetText() == "Withdraw", "volunteering switches to Withdraw")
+
+    SlashCmdList.CASUALHUB("dashboard")
+    check(contains(CH.UI.pageFrames.dashboard.activitiesCard.body:GetText(), "Azuregos"), "dashboard lists open requests")
+    noErrors(CH)
+    reportGlobals()
+end
+
 if scenario then
     print("[" .. scenario .. "]")
     assert(scenarios[scenario], "unknown scenario " .. scenario)()

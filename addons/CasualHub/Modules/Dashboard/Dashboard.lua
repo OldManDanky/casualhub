@@ -39,6 +39,26 @@ function Dashboard:Refresh()
         motd = "|cff999999" .. L["No message of the day."] .. "|r"
     end
     frame.motdCard.body:SetText(motd)
+
+    -- Open activity requests (Activity Board module may be disabled).
+    local A = CH.Modules:IsRunning("Activities") and CH.Activities
+    if A then
+        local open, shown = {}, {}
+        for _, a in ipairs(A:List()) do
+            if A:IsActive(a) then open[#open + 1] = a end
+        end
+        for i = 1, math.min(3, #open) do
+            local a = open[i]
+            shown[#shown + 1] = ("|c%s%s|r %s |cff999999- %s|r"):format(A.CATEGORY_COLORS[a.category] or "ffffffff",
+                A:Label(a.category), a.title, CH.ActivitiesPage.FormatWhen(a))
+        end
+        if #open == 0 then
+            shown[1] = "|cff999999" .. L["No open requests. Post one on the Activities page."] .. "|r"
+        elseif #open > 3 then
+            shown[#shown + 1] = ("|cff999999" .. L["and %d more"] .. "|r"):format(#open - 3)
+        end
+        frame.activitiesCard.body:SetText(table.concat(shown, "\n"))
+    end
 end
 
 local function layout(frame)
@@ -64,8 +84,8 @@ function Dashboard:Build(frame)
 
     frame.activitiesCard = card(L["Open Activity Requests"], 120)
     frame.activitiesCard:SetPoint("TOPLEFT", frame.guildCard, "BOTTOMLEFT", 0, -12)
-    frame.activitiesCard.body:SetText("|cff999999" ..
-        L["The Activity Board arrives in phase 3: post a request, and guildmates volunteer."] .. "|r")
+    frame.activitiesCard:EnableMouse(true)
+    frame.activitiesCard:SetScript("OnMouseUp", function() CH.UI:SelectPage("activities") end)
     frame.eventsCard = card(L["Upcoming Events"], 120)
     frame.eventsCard:SetPoint("TOPLEFT", frame.activitiesCard, "TOPRIGHT", 12, 0)
     frame.eventsCard.body:SetText("|cff999999" ..
@@ -95,6 +115,9 @@ CH:RegisterModule(MODULE, {
         CH.Events:Subscribe("ROSTER_UPDATED", MODULE, refresh)
         CH.Events:RegisterGameEvent("GUILD_MOTD", MODULE, refresh)
         CH.Events:Subscribe("GUILD_CHANGED", MODULE, refresh)
+        CH.Events:Subscribe("SYNC_RECORD_CHANGED", MODULE, function(typeName)
+            if typeName == "activity" then refresh() end
+        end)
     end,
     shutdown = function()
         CH.Events:UnregisterGameEvent("GUILD_MOTD", MODULE)

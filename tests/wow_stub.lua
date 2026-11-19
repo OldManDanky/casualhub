@@ -106,6 +106,10 @@ end
 function methods:GetValue() return self.__value end
 function methods:IsDraggingThumb() return false end
 function methods:CreateFontString(name) return newObject("FontString", name, self) end
+function methods:GetFontString()
+    self.__fontString = self.__fontString or newObject("FontString", nil, self)
+    return self.__fontString
+end
 function methods:CreateTexture(name) return newObject("Texture", name, self) end
 function methods:RegisterEvent(event)
     if not KNOWN_EVENTS[event] then
@@ -199,7 +203,7 @@ function Stub.install(env)
     G.GetLocale = function() return "enUS" end
     G.GetTime = function() return Stub.now end
     G.GetServerTime = function() return Stub.serverTime end
-    G.time = function() return Stub.serverTime end
+    G.time = function(t) if t then return os.time(t) end return Stub.serverTime end
     G.date = os.date
     G.C_AddOns = { GetAddOnMetadata = function(addon, field)
         if field ~= "Version" then return nil end

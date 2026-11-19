@@ -31,7 +31,7 @@ local TOMBSTONE_TTL = 30 * 86400
 local Stats = Sync.stats
 
 -- spec = { namespace = "profiles", validate = function(record) return cleanRecord | nil, reason end,
---          maxRecords = 500 }
+--          maxRecords = 500, prune = function(record, now) return true to delete end (optional) }
 function Sync:RegisterType(name, spec)
     assert(type(spec.namespace) == "string" and type(spec.validate) == "function", "invalid sync type")
     CH.Store:RegisterNamespace(spec.namespace, "guild")
@@ -110,6 +110,13 @@ function Sync:Accept(typeName, record, sender)
         return false, reason
     end
     local spec = self.types[typeName]
+    -- Refuse records we would prune right away; otherwise peers that haven't pruned yet resurrect them.
+    local now = CH.ServerTime()
+    if (clean.deleted and now - clean.updatedAt > TOMBSTONE_TTL) or
+        (spec.prune and not clean.deleted and spec.prune(clean, now)) then
+        Stats.rejected = Stats.rejected + 1
+        return false, "expired"
+    end
     local existing = CH.Store:Get(spec.namespace, clean.id)
     if existing and existing.rev >= clean.rev then
         Stats.stale = Stats.stale + 1
@@ -191,8 +198,9 @@ function Sync:OnHello(sender, body)
     if last and time() - last < SUMMARY_COOLDOWN then return end
     local differing = {}
     for name in pairs(self.types) do
+        -- A peer that doesn't announce a type runs a version without it: skip rather than send it records.
         local theirs, mine = body.d[name], self:Digest(name)
-        if type(theirs) ~= "table" or theirs.h ~= mine.h or theirs.n ~= mine.n then
+        if type(theirs) == "table" and (theirs.h ~= mine.h or theirs.n ~= mine.n) then
             differing[#differing + 1] = name
         end
     end
@@ -278,6 +286,8 @@ function Sync:Prune()
                 doomed[#doomed + 1] = id
             elseif not CH.Roster:IsMember(record.owner) then
                 doomed[#doomed + 1] = id
+            elseif spec.prune and not record.deleted and spec.prune(record, now) then
+                doomed[#doomed + 1] = id
             end
         end
         for _, id in ipairs(doomed) do CH.Store:Delete(spec.namespace, id) end
@@ -304,6 +314,9 @@ function Sync:Init()
     end
     C_Timer.After(HELLO_DELAY_MIN + math.random() * (HELLO_DELAY_MAX - HELLO_DELAY_MIN), hello)
     if C_Timer.NewTicker then
-        self.ticker = C_Timer.NewTicker(HELLO_INTERVAL, function() Sync:SendHello() end)
+        self.ticker = C_Timer.NewTicker(HELLO_INTERVAL, function()
+            Sync:Prune()
+            Sync:SendHello()
+        end)
     end
 end

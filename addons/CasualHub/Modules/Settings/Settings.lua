@@ -34,7 +34,7 @@ function SettingsPage:Build(frame)
     reset:SetPoint("TOPRIGHT", -14, -34)
 
     -- Sharing ----------------------------------------------------------------
-    local sharing = W.Card(frame, L["Profile sharing"])
+    local sharing = W.Card(frame, L["Sharing and notifications"])
     sharing:SetPoint("TOPLEFT", appearance, "BOTTOMLEFT", 0, -12)
     sharing:SetPoint("RIGHT", frame, "RIGHT", -20, 0)
     sharing:SetHeight(64)
@@ -42,6 +42,10 @@ function SettingsPage:Build(frame)
         L["When off, guildmates' copies of your profile are removed and nothing is sent."],
         function(v) S:Set("profile.share", v) end)
     frame.share:SetPoint("TOPLEFT", 12, -32)
+    frame.notifyActivities = W.Checkbox(sharing, L["Activity Board messages in chat"],
+        L["A chat line when someone volunteers for your request, or you're accepted for one."],
+        function(v) S:Set("notifications.activities", v) end)
+    frame.notifyActivities:SetPoint("TOPLEFT", 300, -32)
 
     -- Modules ----------------------------------------------------------------
     local modules = W.Card(frame, L["Modules"])
@@ -112,6 +116,7 @@ function SettingsPage:OnShow()
     frame.minimap:SetChecked(S:Get("minimap.show"))
     frame.debug:SetChecked(S:Get("debug"))
     frame.share:SetChecked(S:Get("profile.share") ~= false)
+    frame.notifyActivities:SetChecked(S:Get("notifications.activities") ~= false)
     for _, cb in ipairs(frame.moduleChecks) do
         cb:SetChecked(S:IsModuleEnabled(cb.module.name))
         cb.status:SetText(L[STATE_LABELS[cb.module.state] or cb.module.state])
