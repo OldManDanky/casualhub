@@ -1,6 +1,6 @@
 # Casual Hub
 
-A guild addon for WoW Forever (Interface 16001). The spec is in `docs/GuildHub_Software_Design_Document_v0.1.docx`;
+A WoW Forever guild management addon, built for Da Filthy Casuals (Interface 16001). The spec is in `docs/GuildHub_Software_Design_Document_v0.1.docx`;
 the client facts it is built on are in `docs/forever-compat.md`.
 
 - `addons/CasualHub/` is the addon (`/chub` in-game). `addons/GuildHubProbe/` is the client compatibility probe (`/ghprobe`).
@@ -10,3 +10,5 @@ the client facts it is built on are in `docs/forever-compat.md`.
 - `tools/png2tga.py` converts PNG artwork into the TGA textures WoW loads (e.g. `Media/icon64.tga` from the CasualBot icon).
 
 Formerly "GuildHub" in the design doc; renamed because another addon already uses that name.
+
+Licensed under the MIT License (see `LICENSE`).
