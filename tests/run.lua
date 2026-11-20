@@ -253,6 +253,16 @@ scenarios.no_guild = function()
     check(not ok and why == "scope unavailable", "guild records refused without a guild")
     SlashCmdList.CASUALHUB("")
     check(contains(CH.UI.pageFrames.dashboard.guildCard.body:GetText(), "not in a guild"), "dashboard explains no guild")
+    for _, entry in ipairs(CH.NAVIGATION) do CH.UI:SelectPage(entry.id) end
+    check(CH.UI.currentPage == "settings", "every page opens without a guild")
+    check(select(2, CH.Activities:Create({ category = "quests", title = "x", expiresAt = Stub.serverTime + 3600 }))
+        == "You need to be in a guild.", "activities explain they need a guild")
+    check(not CH.GuildEvents:Create({ category = "raid", title = "x", startAt = Stub.serverTime + 3600, duration = 60, capacity = 5 }),
+        "events need a guild")
+    check(select(2, CH.Blacklist:Add("Grief Lord", "x")) == "You need to be in a guild.", "blacklist needs a guild")
+    check(not CH.Bulletin:CanPost() and not CH.Professions:CreateRequest({ kind = "craft", title = "x",
+        expiresAt = Stub.serverTime + 3600 }), "notices and requests need a guild")
+    check(#Stub.sent == 0, "nothing is sent without a guild")
     noErrors(CH)
 end
 
