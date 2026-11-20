@@ -318,6 +318,26 @@ function Bulletin:ChecklistProgress()
     return done, #items
 end
 
+-- Housekeeping for per-character state: read marks for notices that no longer exist, and checklist ticks for
+-- items the guild master has since removed. Runs once per session, after login has settled.
+function Bulletin:PruneLocal()
+    local read = CH.Store:Bucket("noticeRead", false)
+    if read then
+        for id in pairs(read) do
+            if not CH.Sync:Get(N_TYPE, id) then read[id] = nil end
+        end
+    end
+    local policy = self:Policy()
+    local ticks = CH.Store:Bucket("welcomeChecklist", false)
+    if policy and ticks then
+        local current = {}
+        for _, item in ipairs(policy.checklist or {}) do current[item] = true end
+        for item in pairs(ticks) do
+            if not current[item] then ticks[item] = nil end
+        end
+    end
+end
+
 ---------------------------------------------------------------------------
 -- Restrained notifications
 ---------------------------------------------------------------------------
@@ -332,7 +352,7 @@ end
 
 function Bulletin:OnRecordChanged(typeName, _, record)
     if typeName ~= N_TYPE and typeName ~= P_TYPE then return end
-    self:UpdateBadge()
+    CH.Debounce("Bulletin-badge", 0.2, function() Bulletin:UpdateBadge() end)
     -- A pinned notice posted while you're online gets one chat line.
     if typeName == N_TYPE and CH.ready and self.announced and not record.deleted and record.pinned
         and not self:IsMine(record) and not self:IsRead(record) and CH.Settings:Get("notifications.notices") then
@@ -359,6 +379,7 @@ CH:RegisterModule(MODULE, {
         -- Give sync a moment to bring in notices posted while we were offline.
         if C_Timer and C_Timer.After then
             C_Timer.After(45, function() CH.SafeCall("notice summary", Bulletin.AnnounceUnread, Bulletin) end)
+            C_Timer.After(90, function() CH.SafeCall("notice housekeeping", Bulletin.PruneLocal, Bulletin) end)
         end
     end,
 })

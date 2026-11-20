@@ -5,6 +5,7 @@ the client facts it is built on are in `docs/forever-compat.md`.
 
 - `addons/CasualHub/` is the addon (`/chub` in-game). `addons/GuildHubProbe/` is the client compatibility probe (`/ghprobe`).
 - `tests/run.sh` runs offline smoke tests in Lua 5.1 against a stubbed WoW API (`tests/wow_stub.lua`).
+  `lua5.1 tests/run.lua perf` is a load test (120 members, thousands of records) that times the hot paths and reports memory.
 - `./deploy.sh [AddonName]` syntax-checks the addons and copies them into the Forever AddOns folder.
   Then `/reload` in-game. Adding or removing files needs a full client restart, not just a `/reload`.
 - `tools/release.sh NOTES.md` tags the TOC version, pushes, and publishes a GitHub release with the addon zip.

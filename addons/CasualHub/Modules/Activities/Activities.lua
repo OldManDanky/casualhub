@@ -199,8 +199,8 @@ end
 -- Live signups for an activity: { name, role, note, state, accepted }.
 function Activities:Volunteers(activity)
     local out = {}
-    for _, s in CH.Sync:Iterate(S_TYPE) do
-        if not s.deleted and s.activityId == activity.id then
+    for _, s in ipairs(CH.Sync:Children(S_TYPE, "activityId", activity.id)) do
+        do
             out[#out + 1] = { name = s.owner, role = s.role, note = s.note, state = s.state,
                 accepted = activity.accepted[s.owner] ~= nil and s.state ~= "withdrawn",
                 withdrewAfterAccept = activity.accepted[s.owner] ~= nil and s.state == "withdrawn" }

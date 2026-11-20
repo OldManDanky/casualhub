@@ -386,7 +386,7 @@ CH:RegisterModule(MODULE, {
         CH.Events:Subscribe("ROSTER_UPDATED", MODULE, refresh)
         CH.Events:Subscribe("PROFILE_SAVED", MODULE, refresh)
         CH.Events:Subscribe("SYNC_RECORD_CHANGED", MODULE, function(typeName)
-            if typeName == "profile" then Page:Refresh() end
+            if typeName == "profile" then CH.Debounce(MODULE, 0.2, function() Page:Refresh() end) end
         end)
     end,
 })

@@ -610,6 +610,17 @@ scenarios.activities = function()
     peerSend(CH, "REC", { y = "signup", r = { id = id .. "|Jaina Proudmoore", owner = "Thrall Stormrage", rev = 1,
         updatedAt = now, activityId = id, role = "dps", state = "volunteered" } })
     check(#A:Volunteers(A:Get(id)) == 1, "signup id must match its owner")
+    local function manualCount(t) local n = 0 for _ in CH.Sync:Iterate(t) do n = n + 1 end return n end
+    check(CH.Sync:Count("signup") == manualCount("signup") and #CH.Sync:Children("signup", "activityId", id) == 1,
+        "cached record count and child index match the store")
+    peerSend(CH, "REC", { y = "signup", r = { id = id .. "|Ghazneth Ironhide", owner = "Ghazneth Ironhide", rev = 1,
+        updatedAt = now, activityId = id, role = "dps", state = "volunteered" } }, nil, "Ghazneth Ironhide")
+    check(CH.Sync:Count("signup") == manualCount("signup") and #CH.Sync:Children("signup", "activityId", id) == 2,
+        "both stay correct after a new record")
+    peerSend(CH, "REC", { y = "signup", r = { id = id .. "|Ghazneth Ironhide", owner = "Ghazneth Ironhide", rev = 2,
+        updatedAt = now, deleted = true } }, nil, "Ghazneth Ironhide")
+    check(CH.Sync:Count("signup") == manualCount("signup") and #CH.Sync:Children("signup", "activityId", id) == 1,
+        "deleted records leave the child index")
 
     check(A:SetAccepted(id, "Thrall Stormrage", "tank"), "organizer accepts a volunteer")
     a = A:Get(id)
@@ -709,6 +720,7 @@ scenarios.activities_ui = function()
     local id = list[1].id
     peerSend(CH, "REC", { y = "signup", r = { id = id .. "|Thrall Stormrage", owner = "Thrall Stormrage", rev = 1,
         updatedAt = Stub.serverTime, activityId = id, role = "dps", state = "volunteered" } })
+    Stub.advance(1)  -- pages redraw once per burst of records, 0.2s later
     local row = page.volunteerRows[1]
     check(row:IsShown() and row.accept:IsShown() and contains(row.text:GetText(), "Thrall Stormrage"), "volunteer listed with Accept")
     row.accept:RunScript("OnClick")
@@ -1242,6 +1254,7 @@ scenarios.bulletin = function()
     peerSend(CH, "REC", { y = "notice", r = notice("Thrall Stormrage#n1", "Thrall Stormrage",
         { kind = "rule", title = "Be kind", body = "No drama in guild chat." }) })
     check(B:Get("Thrall Stormrage#n1") and #B:Rules() == 1, "officer posts a guild rule")
+    Stub.advance(1)
     check(B:UnreadCount() == 1 and CH.UI.navCounts and CH.UI.navCounts.bulletin == 1, "unread count on the sidebar")
     B:MarkRead(B:Get("Thrall Stormrage#n1"))
     check(B:UnreadCount() == 0, "marked read")
@@ -1280,6 +1293,12 @@ scenarios.bulletin = function()
     check(select(2, B:ChecklistProgress()) == 2 and select(1, B:ChecklistProgress()) == 0, "checklist starts empty")
     B:SetChecked("Join the Discord", true)
     check(B:ChecklistProgress() == 1, "ticking an item")
+    B:SetChecked("An item that was removed", true)
+    CH.Store:Bucket("noticeRead", true)["Thrall Stormrage#gone"] = 3
+    B:PruneLocal()
+    check(B:IsChecked("Join the Discord") and not B:IsChecked("An item that was removed")
+        and CH.Store:Bucket("noticeRead", true)["Thrall Stormrage#gone"] == nil
+        and CH.Store:Bucket("noticeRead", true)["Thrall Stormrage#n1"], "stale read marks and checklist ticks cleaned up")
 
     -- Expiry and pruning.
     Stub.advance(2 * 86400)
@@ -1378,6 +1397,128 @@ scenarios.bulletin_ui = function()
     _G.GuildControlGetNumRanks, _G.GuildControlGetRankName = nil, nil
     noErrors(CH)
     reportGlobals()
+end
+
+---------------------------------------------------------------------------
+-- Load test (not part of run.sh): a large guild's worth of synced data, timing the hot paths.
+---------------------------------------------------------------------------
+
+scenarios.perf = function()
+    local roster = { { "Ghazneth Strongbow", "Guild Master", 0, 29, "Hunter", "Zone", true, "HUNTER" } }
+    for i = 1, 119 do
+        roster[#roster + 1] = { ("Member%03d Test"):format(i), "Member", i % 5 == 0 and 1 or 3, 20 + i % 40, "Warrior",
+            "Zone", i % 3 == 0, "WARRIOR" }
+    end
+    local CH = boot({ roster = roster })
+    local S, now = CH.Sync, Stub.serverTime
+    local clock = os.clock
+    local function timed(label, fn, reps)
+        reps = reps or 1
+        collectgarbage("collect")
+        local kb0, t0 = collectgarbage("count"), clock()
+        for _ = 1, reps do fn() end
+        local ms = (clock() - t0) * 1000 / reps
+        print(("  %-44s %8.2f ms   %+8.0f KB garbage/run"):format(label, ms, (collectgarbage("count") - kb0) / reps))
+        return ms
+    end
+    local function rec(typeName, r, sender)
+        r.rev, r.updatedAt = r.rev or 1, r.updatedAt or now
+        return S:Accept(typeName, r, sender or r.owner)
+    end
+    local names = {}
+    for i = 2, #roster do names[#names + 1] = roster[i][1] end
+    collectgarbage("collect")
+    local baseKB = collectgarbage("count")
+    print(("  baseline after login: %.0f KB"):format(baseKB))
+
+    timed("accept 119 profiles", function()
+        for _, n in ipairs(names) do rec("profile", { id = n, owner = n, roles = { "dps" }, days = { "fri" }, times = { "evening" } }) end
+    end)
+    timed("accept 300 activities + 1500 signups", function()
+        for i = 1, 300 do
+            local o = names[i % #names + 1]
+            local id = o .. "#a" .. i
+            rec("activity", { id = id, owner = o, category = "dungeons", title = "Run " .. i, status = "open",
+                expiresAt = now + 86400, roles = { tank = 1, dps = 3 }, capacity = 5 })
+            for j = 1, 5 do
+                local v = names[(i + j * 7) % #names + 1]
+                if v ~= o then rec("signup", { id = id .. "|" .. v, owner = v, activityId = id, role = "dps", state = "volunteered" }) end
+            end
+        end
+    end)
+    timed("accept 100 events + 2000 rsvps", function()
+        for i = 1, 100 do
+            local o = names[i % #names + 1]
+            local id = o .. "#e" .. i
+            rec("event", { id = id, owner = o, category = "raid", title = "Raid " .. i, status = "scheduled",
+                startAt = now + i * 3600, duration = 180, capacity = 40, roles = { tank = 4, healer = 8 } })
+            for j = 1, 20 do
+                local v = names[(i + j * 5) % #names + 1]
+                if v ~= o then rec("rsvp", { id = id .. "|" .. v, owner = v, eventId = id, role = j % 3 == 0 and "tank" or "dps",
+                    state = "going", joinedAt = now - j }) end
+            end
+        end
+    end)
+    local P = CH.Professions
+    timed("accept 400 professions (150 recipes each)", function()
+        for i = 1, 400 do
+            local o = names[i % #names + 1]
+            local ids = {}
+            for k = 1, 150 do ids[k] = 2000 + i * 7 + k * 13 end
+            local skill = ({ 171, 164, 333, 202, 165, 197, 185, 129 })[math.floor(i / #names) % 8 + 1]
+            rec("craft", { id = o .. "|" .. skill, owner = o, skillLine = skill, skill = 200, maxSkill = 300, source = "scan",
+                scannedAt = now - 60, recipes = P.EncodeRecipes(ids) })
+        end
+    end)
+    timed("accept 100 notices", function()
+        for i = 1, 100 do
+            rec("notice", { id = "Member005 Test#n" .. i, owner = "Member005 Test", kind = "announcement", title = "News " .. i,
+                body = string.rep("text ", 60), expiresAt = now + 86400 })
+        end
+    end)
+    collectgarbage("collect")
+    local loadedKB = collectgarbage("count")
+    local counts = {}
+    for t in pairs(S.types) do local n = 0 for _ in S:Iterate(t) do n = n + 1 end counts[#counts + 1] = t .. "=" .. n end
+    table.sort(counts)
+    print(("  memory with data loaded: %.0f KB (+%.0f KB)   %s"):format(loadedKB, loadedKB - baseKB, table.concat(counts, " ")))
+
+    local names2 = {}
+    _G.C_Spell = { GetSpellName = function(id) names2[id] = names2[id] or ("Recipe Name " .. id) return names2[id] end }
+    timed("digest of every type", function() for t in pairs(S.types) do S:Digest(t) end end)
+    timed("Activities:List()", function() CH.Activities:List() end)
+    timed("Events:List() + Lineup of all 100", function()
+        for _, e in ipairs(CH.GuildEvents:List()) do CH.GuildEvents:Lineup(e) end
+    end)
+    timed("Events:CheckReminders()", function() CH.GuildEvents:CheckReminders() end)
+    timed("Professions:Search('') ", function() P:Search("") end)
+    timed("Professions:Search('name 3')", function() P:Search("name 3") end)
+    timed("Professions:Search('name 3') again (cached)", function() P:Search("name 3") end)
+    timed("Bulletin:UnreadCount()", function() CH.Bulletin:UnreadCount() end)
+    timed("Analytics:Collect()", function() CH.Analytics:Collect() end)
+    for _, page in ipairs({ "dashboard", "members", "activities", "events", "professions", "bulletin" }) do
+        SlashCmdList.CASUALHUB(page)
+        timed("open + refresh page " .. page, function() CH.UI:SelectPage(page) end)
+    end
+    timed("Sync:Prune()", function() S:Prune() end)
+    collectgarbage("collect")
+    print(("  memory after all of the above: %.0f KB"):format(collectgarbage("count")))
+    Stub.fire("PLAYER_LOGOUT")
+    local saved = Stub.serialize(CasualHubDB)
+    print(("  SavedVariables size: %.0f KB account, %.0f KB character"):format(#saved / 1024,
+        #Stub.serialize(CasualHubCharDB) / 1024))
+    local parts = {}
+    for ns, bucket in pairs(CasualHubDB.data.guilds["Da Filthy Casuals"] or {}) do
+        parts[#parts + 1] = { ns, #Stub.serialize(bucket) / 1024 }
+    end
+    table.sort(parts, function(x, y) return x[2] > y[2] end)
+    local out = {}
+    for i = 1, math.min(6, #parts) do out[i] = ("%s %.0f KB"):format(parts[i][1], parts[i][2]) end
+    print("  largest: " .. table.concat(out, ", "))
+    local one = CasualHubDB.data.guilds["Da Filthy Casuals"].rsvps
+    local _, sample = next(one)
+    print("  one rsvp as saved: " .. Stub.serialize(sample):gsub("%s+", " "))
+    _G.C_Spell = nil
 end
 
 if scenario then

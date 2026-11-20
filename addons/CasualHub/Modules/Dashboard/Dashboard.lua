@@ -155,7 +155,9 @@ CH:RegisterModule(MODULE, {
         CH.Events:RegisterGameEvent("GUILD_MOTD", MODULE, refresh)
         CH.Events:Subscribe("GUILD_CHANGED", MODULE, refresh)
         CH.Events:Subscribe("SYNC_RECORD_CHANGED", MODULE, function(typeName)
-            if typeName == "activity" or typeName == "event" or typeName == "rsvp" or typeName == "notice" then refresh() end
+            if typeName == "activity" or typeName == "event" or typeName == "rsvp" or typeName == "notice" then
+                CH.Debounce(MODULE, 0.2, refresh)
+            end
         end)
     end,
     shutdown = function()

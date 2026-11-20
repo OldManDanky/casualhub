@@ -644,9 +644,7 @@ end
 
 function Professions:Offers(q)
     local out = {}
-    for _, o in CH.Sync:Iterate(O_TYPE) do
-        if not o.deleted and o.requestId == q.id then out[#out + 1] = o end
-    end
+    for _, o in ipairs(CH.Sync:Children(O_TYPE, "requestId", q.id)) do out[#out + 1] = o end
     table.sort(out, function(a, b)
         if a.state ~= b.state then return a.state == "offered" end
         return a.updatedAt < b.updatedAt

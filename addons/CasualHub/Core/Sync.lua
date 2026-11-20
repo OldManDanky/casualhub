@@ -50,6 +50,48 @@ function Sync:Iterate(typeName)
     return CH.Store:Iterate(self.types[typeName].namespace)
 end
 
+-- Record counts per type, kept up to date on insert so storing a record doesn't rescan the whole type.
+function Sync:Count(typeName)
+    local spec = self.types[typeName]
+    if not spec.count then
+        local n = 0
+        for _ in self:Iterate(typeName) do n = n + 1 end
+        spec.count = n
+    end
+    return spec.count
+end
+
+-- Child records grouped by a parent field (signups by activityId, rsvps by eventId, ...). Built on first use
+-- and dropped whenever a record of that type changes, so lookups are O(children) instead of O(all records).
+-- Returns a list of live (non-deleted) records; treat it as read-only.
+local EMPTY = {}
+function Sync:Children(typeName, field, parentId)
+    local spec = self.types[typeName]
+    local index = spec.index
+    if not index or index.field ~= field then
+        index = { field = field, by = {} }
+        for _, r in self:Iterate(typeName) do
+            local key = not r.deleted and r[field]
+            if key then
+                local list = index.by[key]
+                if not list then
+                    list = {}
+                    index.by[key] = list
+                end
+                list[#list + 1] = r
+            end
+        end
+        spec.index = index
+    end
+    return index.by[parentId] or EMPTY
+end
+
+-- Called whenever records of a type are added, replaced or removed.
+local function changed(spec, added)
+    spec.index = nil
+    if added and spec.count then spec.count = spec.count + 1 end
+end
+
 local function wireCopy(record)
     local out = {}
     for k, v in pairs(record) do
@@ -135,14 +177,11 @@ function Sync:Accept(typeName, record, sender)
             return false, "own record"
         end
     end
-    if not existing then
-        local count = 0
-        for _ in self:Iterate(typeName) do count = count + 1 end
-        if count >= spec.maxRecords then return false, "store full" end
-    end
+    if not existing and self:Count(typeName) >= spec.maxRecords then return false, "store full" end
     clean._receivedAt = time()
     clean._via = sender
     if not CH.Store:Put(spec.namespace, clean.id, clean) then return false, "store unavailable" end
+    changed(spec, not existing)
     Stats.accepted = Stats.accepted + 1
     self.requested[typeName .. "\n" .. clean.id] = nil
     CH.Events:Publish("SYNC_RECORD_CHANGED", typeName, clean.id, clean)
@@ -165,6 +204,7 @@ function Sync:PublishLocal(typeName, record)
     end
     clean._receivedAt = time()
     if not CH.Store:Put(spec.namespace, clean.id, clean) then return false end
+    changed(spec, not existing)
     CH.Events:Publish("SYNC_RECORD_CHANGED", typeName, clean.id, clean)
     CH.Comm:Send("REC", { y = typeName, r = wireCopy(clean) }, "GUILD")
     return true
@@ -298,11 +338,18 @@ function Sync:Prune()
             end
         end
         for _, id in ipairs(doomed) do CH.Store:Delete(spec.namespace, id) end
+        if #doomed > 0 then
+            spec.index, spec.count = nil, nil
+        end
         if #doomed > 0 then CH.Log:Info("pruned %d %s record(s)", #doomed, name) end
     end
 end
 
 function Sync:Init()
+    -- Guild data lives in a per-guild bucket; cached counts and indexes belong to the old one.
+    CH.Events:Subscribe("GUILD_CHANGED", "Sync-cache", function()
+        for _, spec in pairs(Sync.types) do spec.index, spec.count = nil, nil end
+    end)
     local Comm = CH.Comm
     Comm:RegisterHandler("HELLO", function(...) Sync:OnHello(...) end)
     Comm:RegisterHandler("SUM", function(...) Sync:OnSummary(...) end)

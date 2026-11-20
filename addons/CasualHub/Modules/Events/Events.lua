@@ -214,11 +214,7 @@ function Events:List(now)
 end
 
 function Events:Rsvps(e)
-    local out = {}
-    for _, r in CH.Sync:Iterate(R_TYPE) do
-        if not r.deleted and r.eventId == e.id then out[#out + 1] = r end
-    end
-    return out
+    return CH.Sync:Children(R_TYPE, "eventId", e.id)
 end
 
 function Events:MyRsvp(eventId)

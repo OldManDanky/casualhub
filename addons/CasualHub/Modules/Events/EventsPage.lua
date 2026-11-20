@@ -697,7 +697,7 @@ CH:RegisterModule(MODULE, {
         })
         local refresh = function() Page:Refresh() end
         CH.Events:Subscribe("SYNC_RECORD_CHANGED", MODULE, function(typeName)
-            if typeName == "event" or typeName == "rsvp" or typeName == "profile" then Page:Refresh() end
+            if typeName == "event" or typeName == "rsvp" or typeName == "profile" then CH.Debounce(MODULE, 0.2, function() Page:Refresh() end) end
         end)
         CH.Events:Subscribe("ROSTER_UPDATED", MODULE, refresh)
         if C_Timer and C_Timer.NewTicker then C_Timer.NewTicker(30, refresh) end

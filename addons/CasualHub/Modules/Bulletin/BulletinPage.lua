@@ -572,7 +572,7 @@ CH:RegisterModule(MODULE, {
             onShow = function() Page:OnShow() end,
         })
         CH.Events:Subscribe("SYNC_RECORD_CHANGED", MODULE, function(typeName)
-            if typeName == "notice" or typeName == "policy" then Page:Refresh() end
+            if typeName == "notice" or typeName == "policy" then CH.Debounce(MODULE, 0.2, function() Page:Refresh() end) end
         end)
         CH.Events:Subscribe("ROSTER_UPDATED", MODULE, function() Page:Refresh() end)
         B:UpdateBadge()

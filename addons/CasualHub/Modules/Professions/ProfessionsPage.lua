@@ -900,7 +900,7 @@ CH:RegisterModule(MODULE, {
         })
         local refresh = function() Page:Refresh() end
         CH.Events:Subscribe("SYNC_RECORD_CHANGED", MODULE, function(typeName)
-            if typeName == "craft" or typeName == "craftreq" or typeName == "craftoffer" then Page:Refresh() end
+            if typeName == "craft" or typeName == "craftreq" or typeName == "craftoffer" then CH.Debounce(MODULE, 0.2, function() Page:Refresh() end) end
         end)
         CH.Events:Subscribe("PROFESSIONS_SCANNED", MODULE, refresh)
         CH.Events:Subscribe("RECIPE_NAMES_LOADED", MODULE, refresh)

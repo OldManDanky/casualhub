@@ -502,7 +502,10 @@ function Page:Build(frame)
         row.text:SetPoint("LEFT")
         row.text:SetWordWrap(false)
         local function rowButton(text, fn)
-            local b = W.Button(row, text, 60, function() fn(row.volunteer) Page:Refresh() end)
+            local b = W.Button(row, text, 60, function()
+                if row.volunteer then fn(row.volunteer) end
+                Page:Refresh()
+            end)
             b:SetHeight(18)
             return b
         end
@@ -548,7 +551,7 @@ CH:RegisterModule(MODULE, {
         })
         local refresh = function() Page:Refresh() end
         CH.Events:Subscribe("SYNC_RECORD_CHANGED", MODULE, function(typeName)
-            if typeName == "activity" or typeName == "signup" then Page:Refresh() end
+            if typeName == "activity" or typeName == "signup" then CH.Debounce(MODULE, 0.2, function() Page:Refresh() end) end
         end)
         CH.Events:Subscribe("ROSTER_UPDATED", MODULE, refresh)
         -- Keep "in 20m" / expiry labels current while the page is open.

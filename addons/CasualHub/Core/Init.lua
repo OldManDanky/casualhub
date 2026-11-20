@@ -227,3 +227,19 @@ function CH.ParseClock(text)
     if h > 23 then return nil end
     return h, m
 end
+
+-- Runs fn once, `delay` seconds after the first call for `key`; further calls in the meantime are dropped.
+-- Used to redraw a page once per burst of synced records instead of once per record.
+local debounced = {}
+function CH.Debounce(key, delay, fn)
+    if debounced[key] then return end
+    if not (C_Timer and C_Timer.After) then
+        CH.SafeCall(key, fn)
+        return
+    end
+    debounced[key] = true
+    C_Timer.After(delay, function()
+        debounced[key] = nil
+        CH.SafeCall(key, fn)
+    end)
+end
