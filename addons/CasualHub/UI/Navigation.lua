@@ -7,6 +7,8 @@ CH.NAVIGATION = {
     { id = "dashboard", title = L["Dashboard"], icon = "Interface\\Icons\\INV_Misc_Note_01" },
     { id = "members", title = L["Members"], icon = "Interface\\Icons\\INV_Misc_Head_Human_01", phase = 2,
         summary = L["Searchable roster with opt-in profiles: main/alt links, preferred roles, interests and availability."] },
+    { id = "blacklist", title = L["Blacklist"], icon = "Interface\\Icons\\Ability_Rogue_FeignDeath",
+        summary = L["Players guildmates have flagged, with reasons and warnings when you meet them."] },
     { id = "activities", title = L["Activities"], icon = "Interface\\Icons\\INV_Misc_Map_01", phase = 3,
         summary = L["Post requests for quests, dungeons, attunements and world bosses; members volunteer and the organizer closes them."] },
     { id = "events", title = L["Events"], icon = "Interface\\Icons\\INV_Misc_PocketWatch_01", phase = 4,

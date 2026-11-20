@@ -60,7 +60,7 @@ end
 
 local function reportGlobals()
     -- Optional APIs the code probes on purpose; anything else read-but-undefined is suspicious.
-    local expected = { SettingsPanel = true, C_Item = true, GetItemInfo = true, GameTooltip = true, GuildControlGetNumRanks = true, GuildControlGetRankName = true, ChatFontNormal = true, hooksecurefunc = true, ChatEdit_InsertLink = true, ChatFrameUtil = true, Auctionator = true, C_Spell = true, GetSpellInfo = true, GetProfessions = true, GetProfessionInfo = true, C_TradeSkillUI = true, PlaySound = true, SOUNDKIT = true, UnitLevel = true, C_ClassColor = true, CasualHubDB = true, CasualHubCharDB = true, CasualHubMinimapButton = true }
+    local expected = { SettingsPanel = true, TooltipDataProcessor = true, IsInGroup = true, IsInRaid = true, GetNumGroupMembers = true, UnitExists = true, UnitIsPlayer = true, StaticPopupDialogs = true, StaticPopup_Show = true, OKAY = true, C_Item = true, GetItemInfo = true, GameTooltip = true, GuildControlGetNumRanks = true, GuildControlGetRankName = true, ChatFontNormal = true, hooksecurefunc = true, ChatEdit_InsertLink = true, ChatFrameUtil = true, Auctionator = true, C_Spell = true, GetSpellInfo = true, GetProfessions = true, GetProfessionInfo = true, C_TradeSkillUI = true, PlaySound = true, SOUNDKIT = true, UnitLevel = true, C_ClassColor = true, CasualHubDB = true, CasualHubCharDB = true, CasualHubMinimapButton = true }
     local unexpected = {}
     for name in pairs(Stub.missingGlobals) do
         if not expected[name] then unexpected[#unexpected + 1] = name end
@@ -1519,6 +1519,140 @@ scenarios.perf = function()
     local _, sample = next(one)
     print("  one rsvp as saved: " .. Stub.serialize(sample):gsub("%s+", " "))
     _G.C_Spell = nil
+end
+
+---------------------------------------------------------------------------
+-- Blacklist
+---------------------------------------------------------------------------
+
+-- A fake group and units: units = { party1 = "First Last", ... }.
+local function fakeUnits(units, inRaid)
+    _G.UnitExists = function(u) return units[u] ~= nil end
+    _G.UnitIsPlayer = function(u) return units[u] ~= nil end
+    local realGetUnitName = GetUnitName
+    _G.GetUnitName = function(u, full)
+        if units[u] then return units[u] end
+        return realGetUnitName(u, full)
+    end
+    _G.IsInGroup = function() return next(units) ~= nil end
+    _G.IsInRaid = function() return inRaid or false end
+    _G.GetNumGroupMembers = function() local n = 0 for _ in pairs(units) do n = n + 1 end return n end
+end
+
+scenarios.blacklist = function()
+    local tooltipHandler
+    local CH = boot({ beforeLoad = function()
+        _G.Enum = _G.Enum or {}
+        _G.Enum.TooltipDataType = { Unit = 2 }
+        _G.TooltipDataProcessor = { AddTooltipPostCall = function(kind, fn) if kind == 2 then tooltipHandler = fn end end }
+    end })
+    local BL = CH.Blacklist
+    local popups = {}
+    _G.StaticPopupDialogs = {}
+    _G.StaticPopup_Show = function(which, text) popups[#popups + 1] = { which = which, text = text } end
+    check(BL.NormalizeTarget("grief  lord") == "Grief Lord" and BL.NormalizeTarget("Grief-Lord") == "Grief Lord",
+        "names normalized (spaces, hyphen, capitals)")
+    check(BL.NormalizeTarget("x1x") == nil and BL.NormalizeTarget("a b c d") == nil and BL.NormalizeTarget("<script>") == nil,
+        "junk names rejected")
+    drain()
+    check(not BL:Add("Grief Lord", "  "), "a reason is required")
+    check(not BL:Add("Ghazneth Strongbow", "me"), "can't list yourself")
+    local ok, target = BL:Add("grief lord", "Ninja-looted the Onyxia bag and left")
+    Stub.advance(30)
+    local recs = sentMessages(CH, "REC")
+    check(ok and target == "Grief Lord" and #recs == 1 and recs[1].b.y == "blacklist"
+        and recs[1].b.r.id == "Ghazneth Strongbow|Grief Lord", "entry added and shared")
+    check(BL:IsListed("Grief Lord") and BL:Count() == 1, "listed")
+
+    -- A guildmate's entry for the same player, and a forged one.
+    peerSend(CH, "REC", { y = "blacklist", r = { id = "Thrall Stormrage|Grief Lord", owner = "Thrall Stormrage", rev = 1,
+        updatedAt = Stub.serverTime, target = "Grief Lord", reason = "Scammed me in trade" } })
+    peerSend(CH, "REC", { y = "blacklist", r = { id = "Jaina Proudmoore|Grief Lord", owner = "Thrall Stormrage", rev = 1,
+        updatedAt = Stub.serverTime, target = "Grief Lord", reason = "forged" } })
+    check(#BL:Entries("Grief Lord") == 2, "a second reason from a guildmate; forged ids refused")
+    local summary, n = BL:Summary("Grief Lord")
+    check(n == 2 and contains(summary, "+1 more"), "summary mentions the other reports")
+
+    -- Warnings.
+    fakeUnits({ party1 = "Grief Lord", party2 = "Thrall Stormrage" })
+    Stub.fire("GROUP_ROSTER_UPDATE")
+    Stub.advance(2)
+    check(#popups == 1 and popups[1].which == "CASUALHUB_BLACKLIST" and contains(popups[1].text, "Grief Lord")
+        and contains(popups[1].text, "in your group"), "popup when a listed player is in your group")
+    Stub.fire("GROUP_ROSTER_UPDATE")
+    Stub.advance(2)
+    check(#popups == 1, "only once per group")
+    fakeUnits({})
+    Stub.fire("GROUP_ROSTER_UPDATE")
+    Stub.advance(2)
+    fakeUnits({ party1 = "Grief Lord" })
+    Stub.fire("GROUP_ROSTER_UPDATE")
+    Stub.advance(2)
+    check(#popups == 2, "warned again in a new group")
+    Stub.fire("PARTY_INVITE_REQUEST", "Grief-Lord")
+    check(#popups == 3 and contains(popups[3].text, "inviting you"), "popup on a group invite")
+    Stub.printed = {}
+    Stub.fire("CHAT_MSG_WHISPER", "hey wanna buy gold", "Grief-Lord")
+    Stub.fire("CHAT_MSG_WHISPER", "hello?", "Grief-Lord")
+    local whispers = 0
+    for _, m in ipairs(Stub.printed) do if contains(m, "is whispering you") then whispers = whispers + 1 end end
+    check(whispers == 1, "one chat warning per whisperer (not every message)")
+    fakeUnits({ NPC = "Grief Lord" })
+    Stub.fire("TRADE_SHOW")
+    check(printedContains("opened a trade with you"), "chat warning on a trade")
+
+    local lines = {}
+    local tip = { GetUnit = function() return "Grief", "mouseover" end, AddLine = function(_, text) lines[#lines + 1] = text end }
+    fakeUnits({ mouseover = "Grief Lord" })
+    check(tooltipHandler ~= nil, "tooltip hook installed")
+    tooltipHandler(tip)
+    check(#lines == 1 and contains(lines[1], "blacklist (2)"), "tooltip marker")
+    CH.Settings:Set("blacklist.warn.tooltip", false)
+    tooltipHandler(tip)
+    check(#lines == 1, "tooltip marker can be turned off")
+
+    -- Officer clearance: hides current entries for everyone; later entries show again.
+    check(BL:CanClear() and BL:Clear("Grief Lord"), "officer (GM) clears the player")
+    check(not BL:IsListed("Grief Lord") and #BL:List(true) == 1 and BL:List(true)[1].cleared, "cleared entries hidden")
+    peerSend(CH, "REC", { y = "blclear", r = { id = "Ghazneth Ironhide|Some One", owner = "Ghazneth Ironhide", rev = 1,
+        updatedAt = Stub.serverTime, target = "Some One" } }, nil, "Ghazneth Ironhide")
+    check(CH.Sync:Get("blclear", "Ghazneth Ironhide|Some One") == nil, "members can't clear entries")
+    Stub.advance(60)
+    peerSend(CH, "REC", { y = "blacklist", r = { id = "Thrall Stormrage|Grief Lord", owner = "Thrall Stormrage", rev = 2,
+        updatedAt = Stub.serverTime, target = "Grief Lord", reason = "Did it again" } })
+    check(BL:IsListed("Grief Lord") and #BL:Entries("Grief Lord") == 1, "a new entry after the clearance shows")
+    check(BL:Unclear("Grief Lord") and #BL:Entries("Grief Lord") == 2, "undoing the clearance restores the older entry")
+    check(BL:Remove("Grief Lord") and #BL:Entries("Grief Lord") == 1, "removing your own entry")
+    _G.StaticPopupDialogs, _G.StaticPopup_Show = nil, nil
+    noErrors(CH)
+    reportGlobals()
+end
+
+scenarios.blacklist_ui = function()
+    local CH = boot()
+    local BL, Page = CH.Blacklist, CH.BlacklistPage
+    SlashCmdList.CASUALHUB("blacklist")
+    local page = CH.UI.pageFrames.blacklist
+    check(page and page:IsShown() and page.empty:IsShown() and page.warn.group:GetChecked(), "/chub blacklist opens")
+    fakeUnits({ target = "Grief Lord" })
+    page.add:RunScript("OnClick")
+    local ed = page.editor
+    check(ed:IsShown() and ed.name:GetText() == "Grief Lord", "Add player prefills your target")
+    ed.reason:SetText("Ninja looter")
+    Page:SaveEditor()
+    check(not ed:IsShown() and BL:IsListed("Grief Lord") and #page.list.items == 1 and Page.selected == "Grief Lord",
+        "saved from the editor")
+    check(contains(page.detailBody:GetText(), "Ninja looter") and page.actionButtons[1]:GetText() == "Edit my reason"
+        and page.actionButtons[3]:GetText() == "Clear for everyone", "detail with your entry and officer actions")
+    page.search:SetText("nobody")
+    page.search:GetScript("OnTextChanged")(page.search, true)
+    check(#page.list.items == 0, "search filters")
+    page.warn.chat:SetChecked(false)
+    page.warn.chat:RunScript("OnClick")
+    check(CH.Settings:Get("blacklist.warn.chat") == false, "warning toggles saved")
+    fakeUnits({})
+    noErrors(CH)
+    reportGlobals()
 end
 
 if scenario then
