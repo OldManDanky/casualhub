@@ -1,7 +1,7 @@
 ## Interface: 16001
 ## Title: Casual Hub
 ## Notes: Guild member discovery, activity requests, events, crafting and announcements in one window. Type /chub.
-## Version: 0.5.0-alpha
+## Version: 0.6.0-alpha
 ## IconTexture: Interface\AddOns\CasualHub\Media\icon256.tga
 ## SavedVariables: CasualHubDB
 ## SavedVariablesPerCharacter: CasualHubCharDB
@@ -38,6 +38,9 @@ Modules\Events\Events.lua
 Modules\Events\EventsPage.lua
 Modules\Professions\Professions.lua
 Modules\Professions\ProfessionsPage.lua
+Modules\Bulletin\Bulletin.lua
+Modules\Bulletin\Analytics.lua
+Modules\Bulletin\BulletinPage.lua
 Modules\Settings\Settings.lua
 
 Core\Lifecycle.lua

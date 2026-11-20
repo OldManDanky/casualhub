@@ -22,7 +22,7 @@ local DEFAULT_SETTINGS = {
     profile = { share = true },              -- profiles are shared by default (opt-out)
     professions = { share = true },          -- professions and recipes too
     -- Chat lines: someone volunteers / you're accepted; event reminders `eventLead` minutes before the start.
-    notifications = { activities = true, events = true, eventLead = 15 },
+    notifications = { activities = true, events = true, eventLead = 15, notices = true },
 }
 Store.DEFAULT_SETTINGS = DEFAULT_SETTINGS
 

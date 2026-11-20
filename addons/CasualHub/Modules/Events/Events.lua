@@ -69,11 +69,7 @@ end
 
 -- Whether `name` holds an officer-or-higher rank, by our local rank mapping.
 function Events:IsOfficer(name)
-    if name == CH.Identity:PlayerKey() then return CH.Permissions:Can("createOfficialEvent") end
-    local m = CH.Roster:Get(name)
-    if not m then return false end
-    local role = CH.Permissions:RoleForRank(m.rankIndex)
-    return CH.Permissions.ROLE_LEVEL[role] >= CH.Permissions.ROLE_LEVEL.officer
+    return CH.Permissions:CanMember(name, "createOfficialEvent")
 end
 
 ---------------------------------------------------------------------------

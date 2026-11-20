@@ -246,12 +246,28 @@ function UI:RefreshHeader()
     self.window.guildLabel:SetText(guild or L["no guild"])
 end
 
+-- A number next to a sidebar entry (for example unread notices); 0 or nil hides it.
+function UI:SetNavCount(id, count)
+    self.navCounts = self.navCounts or {}
+    self.navCounts[id] = count
+    if self.navButtons then self:RefreshNav() end
+end
+
 function UI:RefreshNav()
     for id, button in pairs(self.navButtons) do
         local isSelected = id == self.currentPage
         button.selected:SetShown(isSelected)
         button.bar:SetShown(isSelected)
-        button.badge:SetShown(self.pages[id] == nil)
+        local count = self.navCounts and self.navCounts[id]
+        if self.pages[id] == nil then
+            button.badge:SetText(L["soon"])
+            button.badge:SetShown(true)
+        elseif count and count > 0 then
+            button.badge:SetText("|cffd4af37" .. count .. "|r")
+            button.badge:SetShown(true)
+        else
+            button.badge:SetShown(false)
+        end
         if isSelected then
             button.text:SetTextColor(GOLD.r, GOLD.g, GOLD.b)
         else

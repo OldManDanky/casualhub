@@ -275,6 +275,26 @@ function W.ToggleRow(parent, values, labelOf, width, onSelect)
     return row
 end
 
+-- Multi-line text box in a bordered panel. Enter adds a line; Escape leaves it. holder.edit is the EditBox.
+function W.TextArea(parent, width, height, maxLetters)
+    local holder = W.CreatePanel(parent, W.COLORS.inset, 0.6)
+    holder:SetSize(width, height)
+    local e = CreateFrame("EditBox", nil, holder)
+    e:SetMultiLine(true)
+    e:SetAutoFocus(false)
+    e:SetFontObject(ChatFontNormal or GameFontHighlight)
+    e:SetPoint("TOPLEFT", 8, -6)
+    e:SetPoint("BOTTOMRIGHT", -8, 6)
+    if maxLetters then e:SetMaxLetters(maxLetters) end
+    e:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    holder:EnableMouse(true)
+    holder:SetScript("OnMouseDown", function() e:SetFocus() end)
+    holder.edit = e
+    function holder:SetText(text) e:SetText(text or "") end
+    function holder:GetText() return e:GetText() end
+    return holder
+end
+
 -- A titled panel used for dashboard cards and settings groups.
 function W.Card(parent, title)
     local card = W.CreatePanel(parent, W.COLORS.inset, 0.5)

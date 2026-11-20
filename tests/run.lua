@@ -60,7 +60,7 @@ end
 
 local function reportGlobals()
     -- Optional APIs the code probes on purpose; anything else read-but-undefined is suspicious.
-    local expected = { SettingsPanel = true, hooksecurefunc = true, ChatEdit_InsertLink = true, ChatFrameUtil = true, Auctionator = true, C_Spell = true, GetSpellInfo = true, GetProfessions = true, GetProfessionInfo = true, C_TradeSkillUI = true, PlaySound = true, SOUNDKIT = true, UnitLevel = true, C_ClassColor = true, CasualHubDB = true, CasualHubCharDB = true, CasualHubMinimapButton = true }
+    local expected = { SettingsPanel = true, GuildControlGetNumRanks = true, GuildControlGetRankName = true, ChatFontNormal = true, hooksecurefunc = true, ChatEdit_InsertLink = true, ChatFrameUtil = true, Auctionator = true, C_Spell = true, GetSpellInfo = true, GetProfessions = true, GetProfessionInfo = true, C_TradeSkillUI = true, PlaySound = true, SOUNDKIT = true, UnitLevel = true, C_ClassColor = true, CasualHubDB = true, CasualHubCharDB = true, CasualHubMinimapButton = true }
     local unexpected = {}
     for name in pairs(Stub.missingGlobals) do
         if not expected[name] then unexpected[#unexpected + 1] = name end
@@ -109,8 +109,9 @@ scenarios.fresh = function()
         check(CH.UI.currentPage == entry.id and CH.UI.pageFrames[entry.id]:IsShown(), "page " .. entry.id .. " opens")
     end
     check(not CH.UI.pageFrames.dashboard:IsShown(), "previous page hidden")
-    check(CH.UI.navButtons.bulletin.badge:IsShown() and not CH.UI.navButtons.settings.badge:IsShown(),
-        "'soon' badge only on unbuilt sections")
+    local anySoon = false
+    for _, b in pairs(CH.UI.navButtons) do if b.badge:IsShown() and b.badge:GetText() == "soon" then anySoon = true end end
+    check(not anySoon, "every section is built: no 'soon' badges")
 
     local page = CH.UI.pageFrames.settings
     page.scale.slider:SetValue(1.2)
@@ -1158,6 +1159,182 @@ scenarios.professions_ui = function()
     Page:SaveMine()
     check(P:MyEntry(171).specialty == "Elixirs" and P:MyEntry(171).skill == 90, "specialty and skill saved")
     _G.C_Spell = nil
+    noErrors(CH)
+    reportGlobals()
+end
+
+---------------------------------------------------------------------------
+-- Phase 6: Bulletin, guild policy, reports
+---------------------------------------------------------------------------
+
+local function guildRanks()
+    local names = { "Guild Master", "Officer", "Veteran", "Member", "Initiate" }
+    _G.GuildControlGetNumRanks = function() return #names end
+    _G.GuildControlGetRankName = function(i) return names[i] end
+end
+
+local function notice(id, owner, fields, rev)
+    local r = { id = id, owner = owner, rev = rev or 1, updatedAt = Stub.serverTime }
+    for k, v in pairs(fields) do r[k] = v end
+    return r
+end
+
+scenarios.bulletin = function()
+    guildRanks()
+    local CH = boot()
+    local B = CH.Bulletin
+    drain()
+    local now = Stub.serverTime
+    local id = B:Post({ kind = "announcement", title = "Raid night moved", body = "Thursday 20:00\nBring flasks",
+        expiresAt = now + 7 * 86400, pinned = true })
+    Stub.advance(30)
+    local recs = sentMessages(CH, "REC")
+    check(id and #recs == 1 and recs[1].b.y == "notice" and recs[1].b.r.body == "Thursday 20:00\nBring flasks",
+        "guild master posts a notice (line breaks kept)")
+    check(not B:Post({ kind = "announcement", title = "x", expiresAt = now + 90 * 86400 }), "rejects expiry over 60 days")
+    check(B:IsRead(B:Get(id)) and B:UnreadCount() == 0, "your own notices count as read")
+
+    -- Authority comes from rank: officers may post, members may not (default policy).
+    peerSend(CH, "REC", { y = "notice", r = notice("Ghazneth Ironhide#n1", "Ghazneth Ironhide",
+        { kind = "announcement", title = "Free gold", expiresAt = now + 86400 }) }, nil, "Ghazneth Ironhide")
+    check(B:Get("Ghazneth Ironhide#n1") == nil, "members can't post notices by default")
+    peerSend(CH, "REC", { y = "notice", r = notice("Thrall Stormrage#n1", "Thrall Stormrage",
+        { kind = "rule", title = "Be kind", body = "No drama in guild chat." }) })
+    check(B:Get("Thrall Stormrage#n1") and #B:Rules() == 1, "officer posts a guild rule")
+    check(B:UnreadCount() == 1 and CH.UI.navCounts and CH.UI.navCounts.bulletin == 1, "unread count on the sidebar")
+    B:MarkRead(B:Get("Thrall Stormrage#n1"))
+    check(B:UnreadCount() == 0, "marked read")
+    peerSend(CH, "REC", { y = "notice", r = notice("Thrall Stormrage#n1", "Thrall Stormrage",
+        { kind = "rule", title = "Be kind", body = "No drama in guild chat or Discord." }, 2) })
+    check(B:UnreadCount() == 1, "an edit makes it unread again")
+
+    -- Login summary, then live pinned notices.
+    Stub.printed = {}
+    B.announced = false
+    B:AnnounceUnread()
+    check(printedContains("1 new guild notice"), "unread summary after login")
+    peerSend(CH, "REC", { y = "notice", r = notice("Thrall Stormrage#n2", "Thrall Stormrage",
+        { kind = "announcement", title = "Onyxia tonight", pinned = true, expiresAt = now + 86400 }) })
+    check(printedContains("New pinned notice from Thrall Stormrage"), "pinned notice announced while online")
+
+    -- Guild policy from the guild master.
+    check(B:SavePolicy({ rankRoles = { ["3"] = "officer" }, noticeRole = "member",
+        checklist = { "Join the Discord", "  ", "Fill in your profile" } }), "guild master saves the policy")
+    local p = B:Policy()
+    check(p and #p.checklist == 2 and p.noticeRole == "member", "policy stored (blank checklist items dropped)")
+    check(CH.Permissions:RoleOf("Ghazneth Ironhide") == "officer"
+        and CH.GuildEvents:IsOfficer("Ghazneth Ironhide"), "policy rank mapping applies (rank 3 now officer)")
+    peerSend(CH, "REC", { y = "notice", r = notice("Jaina Proudmoore#n1", "Jaina Proudmoore",
+        { kind = "announcement", title = "Selling bags", expiresAt = now + 86400 }) }, nil, "Jaina Proudmoore")
+    check(B:Get("Jaina Proudmoore#n1"), "with noticeRole=member anyone may post")
+    peerSend(CH, "REC", { y = "policy", r = { id = "policy|Thrall Stormrage", owner = "Thrall Stormrage", rev = 1,
+        updatedAt = now, rankRoles = { ["1"] = "member" }, noticeRole = "officer" } })
+    check(CH.Sync:Get("policy", "policy|Thrall Stormrage") == nil and B:Policy().owner == "Ghazneth Strongbow",
+        "a policy from anyone but the guild master is refused")
+    peerSend(CH, "REC", { y = "policy", r = { id = "policy|Ghazneth Strongbow", owner = "Ghazneth Strongbow", rev = 99,
+        updatedAt = now, noticeRole = "officer" } })
+    check(B:Policy().noticeRole == "member", "our own policy can't be overwritten by a forged higher revision")
+
+    -- Checklist progress is local.
+    check(select(2, B:ChecklistProgress()) == 2 and select(1, B:ChecklistProgress()) == 0, "checklist starts empty")
+    B:SetChecked("Join the Discord", true)
+    check(B:ChecklistProgress() == 1, "ticking an item")
+
+    -- Expiry and pruning.
+    Stub.advance(2 * 86400)
+    check(#B:List() < #B:List(true), "expired announcements hidden by default")
+    Stub.advance(12 * 86400)
+    CH.Sync:Prune()
+    check(B:Get("Thrall Stormrage#n2") == nil and B:Get("Thrall Stormrage#n1"), "expired announcements pruned; rules stay")
+    local fresh = B:Post({ kind = "announcement", title = "Delete me", expiresAt = Stub.serverTime + 86400 })
+    check(fresh and B:Delete(fresh) and B:Get(fresh) == nil and CH.Sync:Get("notice", fresh).deleted, "author deletes")
+    _G.GuildControlGetNumRanks, _G.GuildControlGetRankName = nil, nil
+    noErrors(CH)
+    reportGlobals()
+end
+
+scenarios.analytics = function()
+    local CH = boot()
+    local An, E, A = CH.Analytics, CH.GuildEvents, CH.Activities
+    check(An.WeekOf(os.time({ year = 2026, month = 11, day = 19, hour = 15 })) == "2026-11-16"
+        and An.WeekOf(os.time({ year = 2026, month = 11, day = 16, hour = 1 })) == "2026-11-16"
+        and An.WeekOf(os.time({ year = 2026, month = 11, day = 22, hour = 23 })) == "2026-11-16", "weeks start on Monday")
+    drain()
+    local now = Stub.serverTime
+    local eid = E:Create({ category = "dungeon", title = "RFK", startAt = now + 3600, duration = 60, capacity = 5,
+        organizerRole = "dps" })
+    rsvp(CH, eid, "Thrall Stormrage", "tank", "going", now - 10)
+    rsvp(CH, eid, "Ghazneth Ironhide", "healer", "going", now - 5)
+    local aid = A:Create({ category = "quests", title = "Help", expiresAt = now + 6 * 3600 })
+    An:Collect()
+    local r = An:Report()[1]
+    check(r and r.events == 0 and r.activitiesPosted == 1 and r.users >= 1, "posted requests counted right away")
+    Stub.advance(3 * 3600)
+    A:SetStatus(aid, "completed")
+    An:Collect()
+    An:Collect()
+    r = An:Report()[1]
+    check(r.events == 1 and r.attendees == 3 and math.abs(r.avgLineup - 3) < 0.01 and r.byCategory.dungeon == 1,
+        "finished event counted once with its lineup")
+    check(r.activitiesCompleted == 1 and r.activitiesPosted == 1, "completed activity counted once")
+    local csv = An:CSV()
+    check(csv:find("^week,events") and csv:find("\n" .. r.week .. ",1,0,3.0,0,3,1,1,0,0,0,", 1, true), "CSV export")
+    check(not csv:find("Thrall"), "no names in the export")
+    -- Retention: only the last 12 weeks are kept.
+    for i = 1, 14 do
+        Stub.advance(7 * 86400)
+        An:Collect()
+    end
+    check(#An:Report(99) == 12, "older weeks dropped after 12")
+    noErrors(CH)
+    reportGlobals()
+end
+
+scenarios.bulletin_ui = function()
+    guildRanks()
+    local CH = boot()
+    local B, Page = CH.Bulletin, CH.BulletinPage
+    SlashCmdList.CASUALHUB("bulletin")
+    local page = CH.UI.pageFrames.bulletin
+    check(page and page:IsShown() and page.newNotice:IsShown() and page.viewRow.buttons.reports:IsShown(),
+        "/chub bulletin opens; the guild master can post and see reports")
+    page.newNotice:RunScript("OnClick")
+    local ed = page.editor
+    check(ed:IsShown() and ed.expiry.buttons[14]:IsShown(), "notice editor (announcements expire)")
+    ed.kind.buttons.rule:RunScript("OnClick")
+    check(not ed.expiry.buttons[14]:IsShown(), "rules have no expiry")
+    ed.title:SetText("Loot rules")
+    ed.body:SetText("Need before greed.\nAsk before rolling on BoEs.")
+    Page:SaveEditor()
+    local n = B:List()[1]
+    check(not ed:IsShown() and n and n.kind == "rule" and n.body:find("\n"), "rule posted from the editor")
+    check(#page.list.items == 1 and contains(page.detailBody:GetText(), "Ask before rolling"), "notice shown")
+
+    B:SavePolicy({ checklist = { "Join the Discord", "Read the loot rules" } })
+    Page:SetView("welcome")
+    check(#page.list.items == 2 and contains(page.detailBody:GetText(), "Loot rules") and contains(page.detailBody:GetText(), "0/2"),
+        "welcome checklist and guild rules")
+    page.list.rows[1]:RunScript("OnClick")
+    check(B:IsChecked("Join the Discord") and contains(page.detailBody:GetText(), "1/2"), "ticking a checklist item")
+
+    Page:SetView("reports")
+    check(Page.view == "reports" and contains(page.detailTitle:GetText(), "Week of"), "reports view")
+
+    Page:SetView("policy")
+    check(#page.list.items == 5 and page.policyEditor:IsShown(), "guild policy lists the ranks with the checklist editor")
+    page.list.rows[3]:RunScript("OnClick")  -- rank index 2 (Veteran): member -> officer
+    check(Page:DraftRole(2) == "officer" and Page.dirty, "clicking a rank toggles it in the draft")
+    page.policyEditor.items[3]:SetText("Say hi in guild chat")
+    page.policyEditor.items[3]:GetScript("OnTextChanged")(page.policyEditor.items[3], true)
+    Page:SavePolicy()
+    local p = B:Policy()
+    check(p.rankRoles["2"] == "officer" and #p.checklist == 3 and CH.Permissions:RoleOf("Jaina Proudmoore") == "officer",
+        "policy saved and shared")
+    SlashCmdList.CASUALHUB("dashboard")
+    B:Post({ kind = "announcement", title = "Pinned news", pinned = true, expiresAt = Stub.serverTime + 86400 })
+    SlashCmdList.CASUALHUB("dashboard")
+    check(contains(CH.UI.pageFrames.dashboard.motdCard.body:GetText(), "Pinned news"), "dashboard shows pinned notices")
+    _G.GuildControlGetNumRanks, _G.GuildControlGetRankName = nil, nil
     noErrors(CH)
     reportGlobals()
 end

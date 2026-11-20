@@ -38,6 +38,18 @@ function Dashboard:Refresh()
     if type(motd) ~= "string" or CH.Compat.IsSecret(motd) or motd == "" then
         motd = "|cff999999" .. L["No message of the day."] .. "|r"
     end
+    -- Pinned and unread guild notices under the MOTD (Bulletin module may be disabled).
+    local B = CH.Modules:IsRunning("Bulletin") and CH.Bulletin
+    if B then
+        local shown = {}
+        for _, n in ipairs(B:List()) do
+            if #shown >= 2 then break end
+            if n.pinned or not B:IsRead(n) then
+                shown[#shown + 1] = ("%s|cffffffff%s|r"):format(n.pinned and "|cffd4af37[!]|r " or "|cff7fd17f*|r ", n.title)
+            end
+        end
+        if #shown > 0 then motd = motd .. "\n\n" .. table.concat(shown, "\n") end
+    end
     frame.motdCard.body:SetText(motd)
 
     -- Open activity requests (Activity Board module may be disabled).
@@ -105,6 +117,8 @@ function Dashboard:Build(frame)
     frame.guildCard = card(L["Guild"], 110)
     frame.guildCard:SetPoint("TOPLEFT", 20, y)
     frame.motdCard = card(L["Message of the Day"], 110)
+    frame.motdCard:EnableMouse(true)
+    frame.motdCard:SetScript("OnMouseUp", function() CH.UI:SelectPage("bulletin") end)
     frame.motdCard:SetPoint("TOPLEFT", frame.guildCard, "TOPRIGHT", 12, 0)
 
     frame.activitiesCard = card(L["Open Activity Requests"], 120)
@@ -141,7 +155,7 @@ CH:RegisterModule(MODULE, {
         CH.Events:RegisterGameEvent("GUILD_MOTD", MODULE, refresh)
         CH.Events:Subscribe("GUILD_CHANGED", MODULE, refresh)
         CH.Events:Subscribe("SYNC_RECORD_CHANGED", MODULE, function(typeName)
-            if typeName == "activity" or typeName == "event" or typeName == "rsvp" then refresh() end
+            if typeName == "activity" or typeName == "event" or typeName == "rsvp" or typeName == "notice" then refresh() end
         end)
     end,
     shutdown = function()
