@@ -72,6 +72,34 @@ local function professionLabel(skillLine)
     return skillLine == "all" and L["All professions"] or P:Name(skillLine)
 end
 
+-- Item tooltip for a recipe or item. Auctionator (and other tooltip addons) add their own lines to it.
+local function showTooltip(owner, itemID, recipeID)
+    if not GameTooltip then return end
+    if not itemID and recipeID then
+        local d = P:RecipeDetails(recipeID)
+        itemID = d and d.item
+    end
+    GameTooltip:SetOwner(owner, "ANCHOR_RIGHT")
+    if itemID and GameTooltip.SetItemByID then
+        GameTooltip:SetItemByID(itemID)
+    elseif recipeID and GameTooltip.SetSpellByID then
+        GameTooltip:SetSpellByID(recipeID)
+    else
+        GameTooltip:Hide()
+        return
+    end
+    GameTooltip:Show()
+end
+
+local function hideTooltip()
+    if GameTooltip then GameTooltip:Hide() end
+end
+
+local function priceText(price, qty)
+    if not price then return "|cff999999" .. L["no price"] .. "|r" end
+    return CH.FormatMoney(price * (qty or 1))
+end
+
 ---------------------------------------------------------------------------
 -- Shared list + detail scaffold
 ---------------------------------------------------------------------------
@@ -93,6 +121,12 @@ local function createRow(list)
     row.left:SetPoint("RIGHT", row.right, "LEFT", -6, 0)
     row.left:SetWordWrap(false)
     row:SetScript("OnClick", function(self) Page:Select(self.item) end)
+    row:SetScript("OnEnter", function(self)
+        local item = self.item
+        if Page.view == "crafters" and item and item.recipeID then showTooltip(self, nil, item.recipeID)
+        elseif Page.view == "requests" and item and item.itemID then showTooltip(self, item.itemID) end
+    end)
+    row:SetScript("OnLeave", hideTooltip)
     return row
 end
 
@@ -104,17 +138,60 @@ local function updateRow(row, item)
     row.selected:SetShown(Page:IsSelected(item))
 end
 
+-- Recipe list lines: { text, recipeID? }. Hover for the item tooltip, click to see materials and cost.
 local function createLine(list)
-    local row = CreateFrame("Frame", nil, list)
+    local row = CreateFrame("Button", nil, list)
+    local hl = row:CreateTexture(nil, "HIGHLIGHT")
+    hl:SetAllPoints()
+    hl:SetColorTexture(1, 1, 1, 0.05)
     row.text = W.Label(row, "", "GameFontHighlightSmall")
     row.text:SetPoint("LEFT", 4, 0)
     row.text:SetPoint("RIGHT", -4, 0)
     row.text:SetWordWrap(false)
+    row:SetScript("OnEnter", function(self)
+        if self.item and self.item.recipeID then showTooltip(self, nil, self.item.recipeID) end
+    end)
+    row:SetScript("OnLeave", hideTooltip)
+    row:SetScript("OnClick", function(self)
+        if self.item and self.item.recipeID then
+            Page.selectedRecipe = self.item.recipeID
+            Page:Refresh()
+        end
+    end)
     return row
 end
 
 local function updateLine(row, item)
-    row.text:SetText(item)
+    row.item = item
+    row.text:SetText(item.text)
+end
+
+-- "Materials: 2x Light Leather (24s), ...", total cost and the crafted item's price.
+function Page:CostLines(recipeID, count, add)
+    local cost = P:CraftCost(recipeID, count)
+    if not cost then return nil end
+    local parts = {}
+    for _, m in ipairs(cost.mats) do
+        parts[#parts + 1] = ("%dx %s %s"):format(m.qty, m.name or ("|cff999999" .. L["item #%d"]:format(m.itemID) .. "|r"),
+            P:PricesAvailable() and ("(" .. priceText(m.price, m.qty) .. ")") or "")
+    end
+    add(L["Materials"], table.concat(parts, ", "))
+    if P:PricesAvailable() then
+        local _, age = P:Price(cost.mats[1].itemID)
+        local total = cost.missing == #cost.mats and ("|cff999999" .. L["no prices"] .. "|r") or
+            (CH.FormatMoney(cost.total) .. (cost.missing > 0 and ("  |cffe8a040" .. (L["%d without a price"]):format(cost.missing) .. "|r") or ""))
+        add(L["Material cost"], total)
+        if cost.item then
+            local sell, sellAge = P:Price(cost.item)
+            if sell then
+                add(L["Sells for"], ("%s %s"):format(CH.FormatMoney(sell * (count or 1)),
+                    (count and count > 1) and ("|cff999999" .. (L["(%d at %s)"]):format(count, CH.FormatMoney(sell)) .. "|r") or ""))
+            end
+            age = sellAge or age
+        end
+        add(L["Prices"], "|cff999999" .. P:PriceAgeText(age) .. "|r")
+    end
+    return cost
 end
 
 ---------------------------------------------------------------------------
@@ -230,24 +307,36 @@ function Page:RenderCrafter()
     add(L["Source"], sourceText(r))
     add(L["Status"], (r._local and L["you"]) or (CH.Roster:IsOnline(r.owner) and "|cff7fd17f" .. L["online"] .. "|r")
         or ("|cff999999" .. L["offline"] .. "|r"))
-    f.detailBody:SetText(table.concat(lines, "\n"))
 
     local ids = P:RecipesOf(r)
+    local has = {}
+    for _, id in ipairs(ids) do has[id] = true end
+    if self.selectedRecipe and has[self.selectedRecipe] then
+        lines[#lines + 1] = ""
+        lines[#lines + 1] = ("|cffd4af37%s|r"):format(P:RecipeLabel(self.selectedRecipe))
+        if not self:CostLines(self.selectedRecipe, 1, add) then
+            lines[#lines + 1] = "|cff999999" .. L["Materials aren't available for this recipe on your client."] .. "|r"
+        end
+    end
+    f.detailBody:SetText(table.concat(lines, "\n"))
+
     local names = {}
     local needle = self.filters.text:lower()
     for _, id in ipairs(ids) do
         local name = P:RecipeLabel(id)
         if needle == "" or name:lower():find(needle, 1, true) then
-            names[#names + 1] = (id == self.selectedRecipe and "|cffd4af37" or "|cffffffff") .. name .. "|r"
+            names[#names + 1] = { text = (id == self.selectedRecipe and "|cffd4af37" or "|cffffffff") .. name .. "|r",
+                recipeID = id, sort = name }
         end
     end
-    table.sort(names, function(a, b) return a:sub(11) < b:sub(11) end)
+    table.sort(names, function(a, b) return a.sort < b.sort end)
     if #ids == 0 then
-        names[1] = "|cff999999" .. (r.source == "manual" and L["Entered by hand: no recipe list."] or
-            L["No recipes shared yet. They appear after the profession window is opened."]) .. "|r"
+        names[1] = { text = "|cff999999" .. (r.source == "manual" and L["Entered by hand: no recipe list."] or
+            L["No recipes shared yet. They appear after the profession window is opened."]) .. "|r" }
     else
-        table.insert(names, 1, "|c" .. GOLD.hex .. (needle ~= "" and (L["Recipes matching \"%s\" (%d of %d)"]):format(
-            self.filters.text, #names, #ids) or (L["Recipes (%d)"]):format(#ids)) .. "|r")
+        table.insert(names, 1, { text = "|c" .. GOLD.hex .. (needle ~= "" and (L["Recipes matching \"%s\" (%d of %d)"]):format(
+            self.filters.text, #names, #ids) or (L["Recipes (%d)"]):format(#ids)) .. "|r  |cff999999" ..
+            L["hover for the item, click for materials"] .. "|r" })
     end
     f.lines:Show()
     f.lines:SetItems(names)
@@ -284,15 +373,21 @@ function Page:RenderRequest()
     add(L["Requested by"], coloredName(q.owner))
     add(L["Status"], P:Label(status) .. (status == "open" and ("  |cff999999" ..
         (L["(open until %s)"]):format(date("%a %d %b", q.expiresAt)) .. "|r") or ""))
-    if q.itemID then
+    if q.details then lines[#lines + 1] = q.details end
+    -- What it takes: materials and cost for a craft (when we can find the recipe), or the item's price.
+    local recipeID = q.kind == "craft" and P:RecipeIDByName(q.title)
+    local shopping
+    local cost = recipeID and self:CostLines(recipeID, q.quantity or 1, add)
+    if cost then
+        shopping = cost.mats
+    elseif q.itemID or q.kind == "materials" then
         local price, age = P:Price(q.itemID)
         if price then
-            add(L["Auction price"], ("%s  |cff999999%s|r"):format(CH.FormatMoney(price),
-                age and (age == 0 and L["(your Auctionator scan today, not live)"] or
-                    (L["(your Auctionator scan %d day(s) ago, not live)"]):format(age)) or L["(Auctionator scan, not live)"]))
+            add(L["Auction price"], ("%s  |cff999999(%s)|r"):format(CH.FormatMoney(price * (q.quantity or 1)),
+                P:PriceAgeText(age)))
         end
+        shopping = { { itemID = q.itemID, qty = q.quantity or 1, name = q.title } }
     end
-    if q.details then lines[#lines + 1] = q.details end
     local crafters = P:CraftersFor(q)
     if #crafters > 0 then
         local names = {}
@@ -342,6 +437,18 @@ function Page:RenderRequest()
             end
         end
         if CH.Roster:IsOnline(q.owner) then action(L["Whisper requester"], function() whisper(q.owner) end) end
+    end
+    if shopping and P:CanMakeShoppingList() then
+        local listName = ("Casual Hub: %s x%d"):format(q.title, q.quantity or 1)
+        action(L["Shopping list"], function()
+            local ok, n, missing = P:MakeShoppingList(listName, shopping)
+            if ok then
+                CH:Print((L["Auctionator shopping list \"%s\" created (%d item(s))%s."]):format(listName, n,
+                    (missing and missing > 0) and ((L[", %d still loading"]):format(missing)) or ""))
+            else
+                CH:Print(n)
+            end
+        end)
     end
     setActions(buttons)
 end

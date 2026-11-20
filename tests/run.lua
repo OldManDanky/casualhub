@@ -60,7 +60,7 @@ end
 
 local function reportGlobals()
     -- Optional APIs the code probes on purpose; anything else read-but-undefined is suspicious.
-    local expected = { SettingsPanel = true, GuildControlGetNumRanks = true, GuildControlGetRankName = true, ChatFontNormal = true, hooksecurefunc = true, ChatEdit_InsertLink = true, ChatFrameUtil = true, Auctionator = true, C_Spell = true, GetSpellInfo = true, GetProfessions = true, GetProfessionInfo = true, C_TradeSkillUI = true, PlaySound = true, SOUNDKIT = true, UnitLevel = true, C_ClassColor = true, CasualHubDB = true, CasualHubCharDB = true, CasualHubMinimapButton = true }
+    local expected = { SettingsPanel = true, C_Item = true, GetItemInfo = true, GameTooltip = true, GuildControlGetNumRanks = true, GuildControlGetRankName = true, ChatFontNormal = true, hooksecurefunc = true, ChatEdit_InsertLink = true, ChatFrameUtil = true, Auctionator = true, C_Spell = true, GetSpellInfo = true, GetProfessions = true, GetProfessionInfo = true, C_TradeSkillUI = true, PlaySound = true, SOUNDKIT = true, UnitLevel = true, C_ClassColor = true, CasualHubDB = true, CasualHubCharDB = true, CasualHubMinimapButton = true }
     local unexpected = {}
     for name in pairs(Stub.missingGlobals) do
         if not expected[name] then unexpected[#unexpected + 1] = name end
@@ -1134,7 +1134,7 @@ scenarios.professions_ui = function()
     check(#page.list.items == 1 and page.list.items[1].recipeName == "Minor Healing Potion", "search finds the recipe")
     Page:Select(page.list.items[1])
     check(contains(page.detailTitle:GetText(), "Thrall Stormrage") and contains(page.detailBody:GetText(), "profession window")
-        and page.lines.items[2] and contains(page.lines.items[2], "Minor Healing Potion"), "crafter detail with source and recipes")
+        and page.lines.items[2] and contains(page.lines.items[2].text, "Minor Healing Potion"), "crafter detail with source and recipes")
     local requestButton
     for _, b in ipairs(page.actionButtons) do if b:IsShown() and b:GetText() == "Request a craft" then requestButton = b end end
     check(requestButton, "Request a craft offered")
@@ -1149,6 +1149,47 @@ scenarios.professions_ui = function()
         "request posted from the crafter view")
     check(contains(page.detailBody:GetText(), "Known crafters") and contains(page.detailBody:GetText(), "Thrall Stormrage"),
         "request shows who can craft it")
+
+    -- Materials, cost and Auctionator: recipe 2330 needs 1 Peacebloom + 1 Silverleaf, makes 1 Minor Healing Potion.
+    local itemNames = { [2447] = "Peacebloom", [765] = "Silverleaf", [118] = "Minor Healing Potion" }
+    _G.C_TradeSkillUI = {
+        GetRecipeOutputItemData = function(id) if id == 2330 then return { itemID = 118 } end end,
+        GetRecipeSchematic = function(id) if id == 2330 then return { quantityMin = 1, reagentSlotSchematics = {
+            { reagents = { { itemID = 2447 } }, quantityRequired = 1 },
+            { reagents = { { itemID = 765 } }, quantityRequired = 1 },
+            { reagents = { { itemID = 9999 } }, quantityRequired = 1, required = false } } } end end,
+    }
+    _G.C_Item = { GetItemNameByID = function(id) return itemNames[id] end }
+    local lists = {}
+    _G.Auctionator = { API = { v1 = {
+        GetAuctionPriceByItemID = function(_, id) return ({ [2447] = 300, [765] = 500, [118] = 2500 })[id] end,
+        GetAuctionAgeByItemID = function() return 1 end,
+        ConvertToSearchString = function(_, term) return '"' .. term.searchString .. '";;;;;;;;;;;;;;;' .. term.quantity end,
+        CreateShoppingList = function(caller, name, terms) lists[name] = { caller = caller, terms = terms } end,
+    } } }
+    local cost = P:CraftCost(2330, 3)
+    check(cost and #cost.mats == 2 and cost.total == 2400 and cost.mats[1].qty == 3 and cost.item == 118,
+        "material cost for three (optional reagents left out)")
+    Page:SetView("requests")
+    Page:Select(q)
+    local body = page.detailBody:GetText()
+    check(contains(body, "3x Peacebloom") and contains(body, "Material cost") and contains(body, "Sells for")
+        and contains(body, "not live"), "request shows materials, cost and sale price with the scan age")
+    local shop
+    for _, b in ipairs(page.actionButtons) do if b:IsShown() and b:GetText() == "Shopping list" then shop = b end end
+    check(shop, "Shopping list button with Auctionator")
+    shop:RunScript("OnClick")
+    local list = lists["Casual Hub: Minor Healing Potion x3"]
+    check(list and list.caller == "Casual Hub" and #list.terms == 2 and contains(list.terms[1], "Peacebloom"),
+        "Auctionator shopping list created with the materials")
+
+    Page:SetView("crafters")
+    Page:Select({ record = P:Crafters()[1] })
+    page.lines.rows[2]:RunScript("OnClick")
+    check(Page.selectedRecipe == 2330 and contains(page.detailBody:GetText(), "Material cost"), "clicking a recipe shows its cost")
+    page.lines.rows[2]:RunScript("OnEnter")
+    page.lines.rows[2]:RunScript("OnLeave")
+    _G.Auctionator, _G.C_TradeSkillUI, _G.C_Item = nil, nil, nil
 
     Page:SetView("mine")
     check(page.mineTools:IsShown() and not page.crafterTools:IsShown() and page.empty:IsShown(), "My professions view")

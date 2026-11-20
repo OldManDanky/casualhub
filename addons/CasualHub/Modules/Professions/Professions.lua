@@ -804,6 +804,138 @@ function Professions:Price(itemID)
     return price, age
 end
 
+-- Price age as shown next to every price: always "your scan", never live.
+function Professions:PriceAgeText(age)
+    if age == 0 then return L["your Auctionator scan today, not live"] end
+    if age then return (L["your Auctionator scan %d day(s) ago, not live"]):format(age) end
+    return L["your Auctionator scan, not live"]
+end
+
+---------------------------------------------------------------------------
+-- Recipe details from the profession API (works outside the profession window on Forever): the crafted
+-- item and the required materials. Cached for the session; nil when the client doesn't know the recipe.
+---------------------------------------------------------------------------
+
+local recipeDetails = {}
+
+function Professions:RecipeDetails(id)
+    local cached = recipeDetails[id]
+    if cached ~= nil then return cached or nil end
+    local T = C_TradeSkillUI
+    if not T then return nil end
+    local out = { mats = {} }
+    if T.GetRecipeOutputItemData then
+        local ok, o = pcall(T.GetRecipeOutputItemData, id)
+        if ok and type(o) == "table" and type(o.itemID) == "number" then out.item = o.itemID end
+    end
+    if T.GetRecipeSchematic then
+        local ok, schematic = pcall(T.GetRecipeSchematic, id, false)
+        if ok and type(schematic) == "table" then
+            if not out.item and type(schematic.outputItemID) == "number" then out.item = schematic.outputItemID end
+            if type(schematic.quantityMin) == "number" and schematic.quantityMin > 0 then out.made = schematic.quantityMin end
+            for _, slot in ipairs(schematic.reagentSlotSchematics or {}) do
+                local reagent = type(slot) == "table" and type(slot.reagents) == "table" and slot.reagents[1]
+                local qty = type(slot) == "table" and slot.quantityRequired
+                if reagent and type(reagent.itemID) == "number" and type(qty) == "number" and qty > 0
+                    and slot.required ~= false then
+                    out.mats[#out.mats + 1] = { itemID = reagent.itemID, qty = qty }
+                end
+            end
+        end
+    end
+    if not out.item and #out.mats == 0 then
+        recipeDetails[id] = false
+        return nil
+    end
+    recipeDetails[id] = out
+    return out
+end
+
+-- Recipe ID for an item or recipe name, from shared recipes and our own name cache.
+function Professions:RecipeIDByName(name)
+    if not name or name == "" then return nil end
+    local lower = name:lower()
+    for id, n in pairs(nameCache()) do
+        if type(n) == "string" and n:lower() == lower then return id end
+    end
+end
+
+local itemRequested = {}
+
+function Professions:ItemName(itemID)
+    if not itemID then return nil end
+    if C_Item and C_Item.GetItemNameByID then
+        local ok, n = pcall(C_Item.GetItemNameByID, itemID)
+        if ok and usable(n) then return n end
+    end
+    if GetItemInfo then
+        local ok, n = pcall(GetItemInfo, itemID)
+        if ok and usable(n) then return n end
+    end
+    if not itemRequested[itemID] and C_Item and C_Item.RequestLoadItemDataByID then
+        itemRequested[itemID] = true
+        pcall(C_Item.RequestLoadItemDataByID, itemID)
+        if CH.Events.unsupported.ITEM_DATA_LOAD_RESULT then self:AnnounceNames(2) end
+    end
+    return nil
+end
+
+function Professions:OnItemLoaded(itemID, success)
+    if itemRequested[itemID] then
+        itemRequested[itemID] = nil
+        if success then self:AnnounceNames(0.5) end
+    end
+end
+
+-- Materials for `count` items made by recipe `id`, priced from Auctionator when available.
+-- Returns { mats = { { itemID, qty, name, price } }, total, missing, item, made, runs } or nil.
+function Professions:CraftCost(id, count)
+    local d = self:RecipeDetails(id)
+    if not d or #d.mats == 0 then return nil end
+    local made = d.made or 1
+    local runs = math.max(1, math.ceil((count or 1) / made))
+    local out = { mats = {}, total = 0, missing = 0, item = d.item, made = made, runs = runs }
+    for _, m in ipairs(d.mats) do
+        local qty = m.qty * runs
+        local price = self:Price(m.itemID)
+        out.mats[#out.mats + 1] = { itemID = m.itemID, qty = qty, name = self:ItemName(m.itemID), price = price }
+        if price then out.total = out.total + price * qty else out.missing = out.missing + 1 end
+    end
+    return out
+end
+
+---------------------------------------------------------------------------
+-- Auctionator shopping lists
+---------------------------------------------------------------------------
+
+function Professions:CanMakeShoppingList()
+    local api = Auctionator and Auctionator.API and Auctionator.API.v1
+    return api ~= nil and type(api.CreateShoppingList) == "function" and type(api.ConvertToSearchString) == "function"
+end
+
+-- items: { { itemID, qty, name? } }. Creates (or replaces) the list. Returns true, count or false, reason.
+function Professions:MakeShoppingList(listName, items)
+    if not self:CanMakeShoppingList() then return false, L["Auctionator isn't loaded."] end
+    local api, terms, missing = Auctionator.API.v1, {}, 0
+    for _, item in ipairs(items) do
+        local name = item.name or self:ItemName(item.itemID)
+        if name then
+            local ok, term = pcall(api.ConvertToSearchString, CALLER,
+                { searchString = name, isExact = true, quantity = item.qty })
+            if ok and type(term) == "string" then terms[#terms + 1] = term end
+        else
+            missing = missing + 1
+        end
+    end
+    if #terms == 0 then return false, L["Item names are still loading. Try again in a moment."] end
+    local ok, err = pcall(api.CreateShoppingList, CALLER, listName, terms)
+    if not ok then
+        CH.Log:Warn("Auctionator shopping list failed: %s", tostring(err))
+        return false, L["Auctionator couldn't create the list."]
+    end
+    return true, #terms, missing
+end
+
 function CH.FormatMoney(copper)
     copper = math.floor(copper or 0)
     local g, s, c = math.floor(copper / 10000), math.floor(copper / 100) % 100, copper % 100
@@ -857,6 +989,9 @@ CH:RegisterModule(MODULE, {
         CH.Events:RegisterGameEvent("SPELL_DATA_LOAD_RESULT", MODULE, function(spellID, success)
             CH.SafeCall("recipe name", Professions.OnSpellLoaded, Professions, spellID, success)
         end)
+        CH.Events:RegisterGameEvent("ITEM_DATA_LOAD_RESULT", MODULE, function(itemID, success)
+            CH.SafeCall("item name", Professions.OnItemLoaded, Professions, itemID, success)
+        end)
         CH.Events:Subscribe("SETTING_CHANGED", MODULE, function(path)
             if path == "professions.share" then Professions:Publish() end
         end)
@@ -874,7 +1009,7 @@ CH:RegisterModule(MODULE, {
     end,
     shutdown = function()
         for _, event in ipairs({ "TRADE_SKILL_SHOW", "TRADE_SKILL_LIST_UPDATE", "TRADE_SKILL_DATA_SOURCE_CHANGED",
-            "SKILL_LINES_CHANGED", "SPELL_DATA_LOAD_RESULT" }) do
+            "SKILL_LINES_CHANGED", "SPELL_DATA_LOAD_RESULT", "ITEM_DATA_LOAD_RESULT" }) do
             CH.Events:UnregisterGameEvent(event, MODULE)
         end
     end,
