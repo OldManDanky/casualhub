@@ -85,6 +85,16 @@ character level 29 Hunter, Guild Master of a 55-member guild. Design doc §10 as
   `IsTradeSkillLinked` and `IsTradeSkillGuild` are false for your own window.
 - Recipe data is only available while the profession window is open, so GuildHub has to capture it on
   `TRADE_SKILL_SHOW` / `TRADE_SKILL_LIST_UPDATE` and cache it.
+- Recipe IDs are spell IDs. Naming a recipe you don't know (measured 2026-11-19, 0.5.0):
+  - `C_Spell.GetSpellName(id)` returns nothing until the client has loaded that spell. After
+    `C_Spell.RequestLoadSpellData(id)` (and a moment) it returns the name.
+  - `C_TradeSkillUI.GetRecipeInfo(id)` returns the recipe, with its name, **outside** the profession window too
+    (tested on an unlearned recipe of a profession the character has).
+  - The global `GetSpellInfo` is missing.
+  - Casual Hub tries its cache, then GetSpellName, then GetRecipeInfo, then requests a load and fills in the name
+    on `SPELL_DATA_LOAD_RESULT`.
+- Forever adds recipes outside the classic lists, with IDs above 1,000,000 (for example Skinning "Camp Chair",
+  Fishing "Fish Bowl", and Leatherworking items like "Skirmisher's Leather Gloves").
 
 ## UI, settings, utilities
 - Every template probed works: `BackdropTemplate`, `ButtonFrameTemplate`, `PortraitFrameTemplate`,

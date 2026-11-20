@@ -226,19 +226,84 @@ local function nameCache()
     return CH.Store:Bucket("recipeNames", true) or {}
 end
 
+-- Resolution order (measured on Forever, see docs/forever-compat.md):
+--   1. names cached from our own profession windows or earlier lookups
+--   2. C_Spell.GetSpellName: works for any recipe once the client has loaded that spell
+--   3. C_TradeSkillUI.GetRecipeInfo: works outside the profession window too
+--   4. otherwise ask the client to load the spell; SPELL_DATA_LOAD_RESULT fills the cache and the page
+--      refreshes (event RECIPE_NAMES_LOADED).
+local MAX_LOAD_REQUESTS = 4000  -- per session
+local loadRequested, loadCount = {}, 0
+
+local function usable(n)
+    return type(n) == "string" and n ~= "" and not CH.Compat.IsSecret(n)
+end
+
+local function lookup(id)
+    if C_Spell and C_Spell.GetSpellName then
+        local ok, n = pcall(C_Spell.GetSpellName, id)
+        if ok and usable(n) then return n end
+    end
+    if C_TradeSkillUI and C_TradeSkillUI.GetRecipeInfo then
+        local ok, info = pcall(C_TradeSkillUI.GetRecipeInfo, id)
+        if ok and type(info) == "table" and usable(info.name) then return info.name end
+    end
+    if GetSpellInfo then
+        local ok, n = pcall(GetSpellInfo, id)
+        if ok and usable(n) then return n end
+    end
+end
+
+-- Tells the page (once per burst) that more names may be available.
+function Professions:AnnounceNames(delay)
+    if self.namesPending then return end
+    self.namesPending = true
+    local function announce()
+        Professions.namesPending = false
+        CH.Events:Publish("RECIPE_NAMES_LOADED")
+    end
+    if C_Timer and C_Timer.After then C_Timer.After(delay, announce) else announce() end
+end
+
+function Professions:RequestName(id)
+    if loadRequested[id] or loadCount >= MAX_LOAD_REQUESTS then return end
+    if not (C_Spell and C_Spell.RequestLoadSpellData) then return end
+    loadRequested[id] = true
+    loadCount = loadCount + 1
+    pcall(C_Spell.RequestLoadSpellData, id)
+    -- Without the load event, re-render after a moment; the lookup succeeds once the data is in.
+    if CH.Events.unsupported.SPELL_DATA_LOAD_RESULT then self:AnnounceNames(2) end
+end
+
 function Professions:RecipeName(id)
     local cache = nameCache()
     local name = cache[id]
     if type(name) == "string" then return name end
-    if C_Spell and C_Spell.GetSpellName then
-        local ok, n = pcall(C_Spell.GetSpellName, id)
-        if ok and type(n) == "string" and n ~= "" and not CH.Compat.IsSecret(n) then return n end
+    name = lookup(id)
+    if name then
+        cache[id] = name
+        return name
     end
-    if GetSpellInfo then
-        local ok, n = pcall(GetSpellInfo, id)
-        if ok and type(n) == "string" and n ~= "" and not CH.Compat.IsSecret(n) then return n end
-    end
+    self:RequestName(id)
     return nil
+end
+
+-- Loads names for a guildmate's recipes ahead of any search.
+function Professions:WarmNames(record)
+    local cache = nameCache()
+    for _, id in ipairs(self:RecipesOf(record)) do
+        if cache[id] == nil then self:RecipeName(id) end
+    end
+end
+
+function Professions:OnSpellLoaded(spellID, success)
+    if not loadRequested[spellID] then return end
+    loadRequested[spellID] = nil
+    if not success then return end
+    local name = lookup(spellID)
+    if not name then return end
+    nameCache()[spellID] = name
+    self:AnnounceNames(0.5)
 end
 
 function Professions:RecipeLabel(id)
@@ -754,6 +819,10 @@ end
 ---------------------------------------------------------------------------
 
 function Professions:OnRecordChanged(typeName, id, record)
+    if typeName == C_TYPE and not record.deleted and record.owner ~= CH.Identity:PlayerKey() then
+        self:WarmNames(record)
+        return
+    end
     if typeName ~= O_TYPE or not CH.ready or not CH.Settings:Get("notifications.activities") then return end
     if record.deleted or record.state ~= "offered" or record.owner == CH.Identity:PlayerKey() then return end
     local q = self:GetRequest(record.requestId)
@@ -785,6 +854,9 @@ CH:RegisterModule(MODULE, {
             CH.Events:RegisterGameEvent(event, MODULE, scan)
         end
         CH.Events:RegisterGameEvent("SKILL_LINES_CHANGED", MODULE, skills)
+        CH.Events:RegisterGameEvent("SPELL_DATA_LOAD_RESULT", MODULE, function(spellID, success)
+            CH.SafeCall("recipe name", Professions.OnSpellLoaded, Professions, spellID, success)
+        end)
         CH.Events:Subscribe("SETTING_CHANGED", MODULE, function(path)
             if path == "professions.share" then Professions:Publish() end
         end)
@@ -802,7 +874,7 @@ CH:RegisterModule(MODULE, {
     end,
     shutdown = function()
         for _, event in ipairs({ "TRADE_SKILL_SHOW", "TRADE_SKILL_LIST_UPDATE", "TRADE_SKILL_DATA_SOURCE_CHANGED",
-            "SKILL_LINES_CHANGED" }) do
+            "SKILL_LINES_CHANGED", "SPELL_DATA_LOAD_RESULT" }) do
             CH.Events:UnregisterGameEvent(event, MODULE)
         end
     end,

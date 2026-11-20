@@ -796,6 +796,7 @@ CH:RegisterModule(MODULE, {
             if typeName == "craft" or typeName == "craftreq" or typeName == "craftoffer" then Page:Refresh() end
         end)
         CH.Events:Subscribe("PROFESSIONS_SCANNED", MODULE, refresh)
+        CH.Events:Subscribe("RECIPE_NAMES_LOADED", MODULE, refresh)
         CH.Events:Subscribe("ROSTER_UPDATED", MODULE, refresh)
     end,
 })

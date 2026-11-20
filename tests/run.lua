@@ -1042,6 +1042,24 @@ scenarios.professions = function()
     check(#P:Search("", 171) == 1 and #P:Search("", nil, true) == 4, "profession and online filters")
     check(P:RecipeLabel(424242) == "Recipe #424242", "unknown recipes get a placeholder")
 
+    -- Names the client hasn't loaded yet: requested on arrival, filled in when the spell data loads.
+    local loaded, requested = {}, {}
+    _G.C_Spell = { GetSpellName = function(id) return loaded[id] or names[id] end,
+        RequestLoadSpellData = function(sid) requested[sid] = true end }
+    local refreshed = 0
+    CH.Events:Subscribe("RECIPE_NAMES_LOADED", "test", function() refreshed = refreshed + 1 end)
+    peerSend(CH, "REC", { y = "craft", r = { id = "Thrall Stormrage|202", owner = "Thrall Stormrage", rev = 1,
+        updatedAt = Stub.serverTime, skillLine = 202, source = "scan", recipes = P.EncodeRecipes({ 3918, 3919 }) } })
+    check(requested[3918] and requested[3919], "names requested as soon as a guildmate's recipes arrive")
+    check(P:RecipeLabel(3918) == "Recipe #3918", "placeholder until the name loads")
+    loaded[3918] = "Rough Blasting Powder"
+    Stub.fire("SPELL_DATA_LOAD_RESULT", 3918, true)
+    Stub.fire("SPELL_DATA_LOAD_RESULT", 3919, false)
+    Stub.advance(1)
+    check(P:RecipeName(3918) == "Rough Blasting Powder" and refreshed == 1, "loaded name cached and the page told once")
+    check(#P:Search("blasting") == 1, "loaded names are searchable")
+    CH.Events:Unsubscribe("RECIPE_NAMES_LOADED", "test")
+
     -- Sharing off retracts everything.
     drain()
     CH.Settings:Set("professions.share", false)
