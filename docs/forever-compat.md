@@ -96,6 +96,11 @@ character level 29 Hunter, Guild Master of a 55-member guild. Design doc §10 as
 - Forever adds recipes outside the classic lists, with IDs above 1,000,000 (for example Skinning "Camp Chair",
   Fishing "Fish Bowl", and Leatherworking items like "Skirmisher's Leather Gloves").
 
+## Group, invites, whispers (measured 2026-11-20, 0.7.0)
+- `PARTY_INVITE_REQUEST`, `CHAT_MSG_WHISPER` and `GROUP_ROSTER_UPDATE` fire, and the names they give
+  (after `-` becomes a space) match the "First Last" key, so blacklist warnings work for invites,
+  whispers and group joins. `StaticPopup_Show` works for addon popups.
+
 ## UI, settings, utilities
 - Every template probed works: `BackdropTemplate`, `ButtonFrameTemplate`, `PortraitFrameTemplate`,
   `WowScrollBoxList` + `MinimalScrollBar`, `WowStyle1DropdownTemplate`, `ScrollingEditBoxTemplate`,
