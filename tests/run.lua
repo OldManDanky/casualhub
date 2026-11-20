@@ -60,7 +60,7 @@ end
 
 local function reportGlobals()
     -- Optional APIs the code probes on purpose; anything else read-but-undefined is suspicious.
-    local expected = { SettingsPanel = true, PlaySound = true, SOUNDKIT = true, UnitLevel = true, C_ClassColor = true, CasualHubDB = true, CasualHubCharDB = true, CasualHubMinimapButton = true }
+    local expected = { SettingsPanel = true, hooksecurefunc = true, ChatEdit_InsertLink = true, ChatFrameUtil = true, Auctionator = true, C_Spell = true, GetSpellInfo = true, GetProfessions = true, GetProfessionInfo = true, C_TradeSkillUI = true, PlaySound = true, SOUNDKIT = true, UnitLevel = true, C_ClassColor = true, CasualHubDB = true, CasualHubCharDB = true, CasualHubMinimapButton = true }
     local unexpected = {}
     for name in pairs(Stub.missingGlobals) do
         if not expected[name] then unexpected[#unexpected + 1] = name end
@@ -109,7 +109,7 @@ scenarios.fresh = function()
         check(CH.UI.currentPage == entry.id and CH.UI.pageFrames[entry.id]:IsShown(), "page " .. entry.id .. " opens")
     end
     check(not CH.UI.pageFrames.dashboard:IsShown(), "previous page hidden")
-    check(CH.UI.navButtons.professions.badge:IsShown() and not CH.UI.navButtons.settings.badge:IsShown(),
+    check(CH.UI.navButtons.bulletin.badge:IsShown() and not CH.UI.navButtons.settings.badge:IsShown(),
         "'soon' badge only on unbuilt sections")
 
     local page = CH.UI.pageFrames.settings
@@ -949,6 +949,197 @@ scenarios.events_ui = function()
     check(settings.notifyEvents:GetChecked() and settings.eventLead.value == 15, "reminder settings shown")
     settings.eventLead.buttons[30]:RunScript("OnClick")
     check(CH.Settings:Get("notifications.eventLead") == 30, "reminder lead saved")
+    noErrors(CH)
+    reportGlobals()
+end
+
+---------------------------------------------------------------------------
+-- Phase 5: Professions
+---------------------------------------------------------------------------
+
+local function fakeTradeSkill(professionID, name, recipes)
+    -- recipes: { {id, name, learned} }
+    _G.C_TradeSkillUI = {
+        GetBaseProfessionInfo = function() return { professionID = professionID, professionName = name,
+            skillLevel = 150, maxSkillLevel = 225 } end,
+        GetAllRecipeIDs = function()
+            local ids = {}
+            for i, r in ipairs(recipes) do ids[i] = r[1] end
+            return ids
+        end,
+        GetRecipeInfo = function(id)
+            for _, r in ipairs(recipes) do if r[1] == id then return { recipeID = id, name = r[2], learned = r[3] } end end
+        end,
+        IsTradeSkillLinked = function() return false end,
+        IsTradeSkillGuild = function() return false end,
+    }
+end
+
+scenarios.professions = function()
+    local CH = boot()
+    local P = CH.Professions
+    -- Encoding
+    local text, n = P.EncodeRecipes({ 2153, 2149, 2152, 2149, 9060 })
+    local back = P.DecodeRecipes(text)
+    check(n == 4 and #back == 4 and back[1] == 2149 and back[4] == 9060, "recipe IDs round-trip (sorted, deduped)")
+    check(#text < 20, "encoding is compact: " .. text)
+    check(P.DecodeRecipes("12.0.3") == nil and P.DecodeRecipes("ab|c") == nil, "malformed recipe strings rejected")
+
+    -- Skill levels from the profession list, recipes from the window.
+    _G.GetProfessions = function() return 1, 2, nil, nil, 3 end
+    local info = { { "Leatherworking", 165, 150, 225 }, { "Skinning", 393, 160, 225 }, { "Cooking", 185, 60, 75 } }
+    _G.GetProfessionInfo = function(i)
+        local p = info[i]
+        return p[1], "icon", p[3], p[4], 0, 0, p[2]
+    end
+    CH.Professions:RefreshSkills()
+    check(#P:MyEntries() == 3 and P:MyEntry(165).skill == 150 and P:MyEntry(165).source == "scan", "professions detected")
+    fakeTradeSkill(165, "Leatherworking", { { 2149, "Handstitched Leather Boots", true },
+        { 2152, "Light Armor Kit", true }, { 9060, "Heavy Leather Ball", false } })
+    drain()
+    Stub.fire("TRADE_SKILL_SHOW")
+    local lw = P:MyEntry(165)
+    check(lw.count == 2 and P.DecodeRecipes(lw.recipes)[2] == 2152 and lw.scannedAt, "only learned recipes captured")
+    check(P:RecipeName(9060) == "Heavy Leather Ball", "names of every recipe in the window cached")
+    Stub.advance(25)
+    local recs = sentMessages(CH, "REC")
+    local published = {}
+    for _, m in ipairs(recs) do if m.b.y == "craft" then published[m.b.r.id] = m.b.r end end
+    check(published["Ghazneth Strongbow|165"] and published["Ghazneth Strongbow|165"].recipes == lw.recipes,
+        "recipes published after a short delay")
+    check(CH.Sync:Get("craft", "Ghazneth Strongbow|393") and not CH.Sync:Get("craft", "Ghazneth Strongbow|393").deleted,
+        "professions without a window scan are shared too (skill only)")
+    local count = #Stub.sent
+    Stub.fire("TRADE_SKILL_SHOW")
+    Stub.advance(25)
+    check(#Stub.sent == count, "reopening the window with nothing new sends nothing")
+
+    -- Linked (someone else's) windows are ignored.
+    C_TradeSkillUI.IsTradeSkillLinked = function() return true end
+    fakeTradeSkill(171, "Alchemy", { { 2330, "Minor Healing Potion", true } })
+    C_TradeSkillUI.IsTradeSkillLinked = function() return true end
+    Stub.fire("TRADE_SKILL_SHOW")
+    check(P:MyEntry(171) == nil, "linked profession windows aren't captured as yours")
+
+    -- Guildmates' professions and search.
+    local enc = P.EncodeRecipes({ 2330, 2332, 3170 })
+    peerSend(CH, "REC", { y = "craft", r = { id = "Thrall Stormrage|171", owner = "Thrall Stormrage", rev = 1,
+        updatedAt = Stub.serverTime, skillLine = 171, name = "Alchemy", skill = 200, maxSkill = 225, source = "scan",
+        scannedAt = Stub.serverTime - 86400, specialty = "Potions", recipes = enc } })
+    peerSend(CH, "REC", { y = "craft", r = { id = "Jaina Proudmoore|197", owner = "Jaina Proudmoore", rev = 1,
+        updatedAt = Stub.serverTime, skillLine = 197, source = "manual", note = "Mageweave bags" } }, nil, "Jaina Proudmoore")
+    peerSend(CH, "REC", { y = "craft", r = { id = "Thrall Stormrage|999", owner = "Thrall Stormrage", rev = 1,
+        updatedAt = Stub.serverTime, skillLine = 171, source = "scan" } })
+    check(CH.Sync:Get("craft", "Thrall Stormrage|999") == nil, "record id must match its profession")
+    local names = { [2330] = "Minor Healing Potion", [2332] = "Minor Rejuvenation Potion", [3170] = "Weak Troll's Blood Elixir" }
+    _G.C_Spell = { GetSpellName = function(id) return names[id] end }
+    local rows = P:Search("potion")
+    check(#rows == 3 and not rows[1].recipeName and rows[2].recipeName == "Minor Healing Potion"
+        and rows[3].recipeName == "Minor Rejuvenation Potion" and rows[2].record.owner == "Thrall Stormrage",
+        "search matches the crafter (specialty \"Potions\") and resolves recipe names through the spell API")
+    rows = P:Search("bags")
+    check(#rows == 1 and rows[1].record.owner == "Jaina Proudmoore" and not rows[1].recipeName, "notes are searchable")
+    check(#P:Search("", 171) == 1 and #P:Search("", nil, true) == 4, "profession and online filters")
+    check(P:RecipeLabel(424242) == "Recipe #424242", "unknown recipes get a placeholder")
+
+    -- Sharing off retracts everything.
+    drain()
+    CH.Settings:Set("professions.share", false)
+    recs = sentMessages(CH, "REC")
+    local tombs = 0
+    for _, m in ipairs(recs) do if m.b.y == "craft" and m.b.r.deleted then tombs = tombs + 1 end end
+    check(tombs == 3, "turning sharing off retracts all three professions")
+    CH.Settings:Set("professions.share", true)
+
+    -- Manual entries.
+    check(P:SaveMine(197, { skill = "120", specialty = "Bags" }) and P:MyEntry(197).source == "manual"
+        and P:MyEntry(197).skill == 120, "manual profession added")
+    check(P:RemoveMine(197) and P:MyEntry(197) == nil, "manual profession removed")
+    check(not P:RemoveMine(165), "scanned professions can't be removed by hand")
+
+    -- Requests and offers.
+    drain()
+    local itemID, title = P.ParseItemText("|cff1eff00|Hitem:4240::::::::29:::::|h[Blue Linen Bag]|h|r")
+    check(itemID == 4240 and title == "Blue Linen Bag", "item links parsed")
+    local id = P:CreateRequest({ kind = "craft", title = "Minor Healing Potion", skillLine = 171, quantity = 5,
+        expiresAt = Stub.serverTime + 3 * 86400 })
+    check(id and P:GetRequest(id).quantity == 5, "craft request posted")
+    local who = P:CraftersFor(P:GetRequest(id))
+    check(#who == 1 and who[1].name == "Thrall Stormrage", "known crafters suggested for a request")
+    check(not P:CreateRequest({ kind = "craft", title = "x", expiresAt = Stub.serverTime + 20 * 86400 }), "rejects long expiry")
+    peerSend(CH, "REC", { y = "craftoffer", r = { id = id .. "|Thrall Stormrage", owner = "Thrall Stormrage", rev = 1,
+        updatedAt = Stub.serverTime, requestId = id, state = "offered", note = "have mats" } })
+    check(P:ActiveOfferCount(P:GetRequest(id)) == 1 and printedContains("Thrall Stormrage can help with"),
+        "offer received and requester told")
+    check(not P:Offer(id), "can't offer on your own request")
+    check(P:SetRequestStatus(id, "done") and P:EffectiveStatus(P:GetRequest(id)) == "done", "request marked done")
+    peerSend(CH, "REC", { y = "craftreq", r = { id = "Thrall Stormrage#q1", owner = "Thrall Stormrage", rev = 1,
+        updatedAt = Stub.serverTime, kind = "materials", title = "Silverleaf", quantity = 20, status = "open",
+        expiresAt = Stub.serverTime + 86400, itemID = 765 } })
+    check(P:Offer("Thrall Stormrage#q1", "I have 12") and P:MyOffer("Thrall Stormrage#q1").state == "offered", "offer to help")
+    check(P:WithdrawOffer("Thrall Stormrage#q1") and P:MyOffer("Thrall Stormrage#q1").state == "withdrawn", "withdraw offer")
+
+    -- Auctionator prices, when installed.
+    check(P:Price(765) == nil, "no prices without Auctionator")
+    _G.Auctionator = { API = { v1 = {
+        GetAuctionPriceByItemID = function(caller, item) assert(caller == "Casual Hub") return item == 765 and 1234 or nil end,
+        GetAuctionAgeByItemID = function() return 2 end } } }
+    local price, age = P:Price(765)
+    check(price == 1234 and age == 2, "Auctionator price and age")
+    check(CH.FormatMoney(123456):find("12g") and CH.FormatMoney(123456):find("34s"), "money formatting")
+    _G.Auctionator.API.v1.GetAuctionPriceByItemID = function() error("boom") end
+    check(P:Price(765) == nil, "Auctionator errors are contained")
+    _G.Auctionator = nil
+
+    Stub.advance(5 * 86400)
+    CH.Sync:Prune()
+    check(P:GetRequest(id) == nil and P:GetRequest("Thrall Stormrage#q1") == nil, "finished and expired requests pruned")
+    _G.C_TradeSkillUI, _G.C_Spell, _G.GetProfessions, _G.GetProfessionInfo = nil, nil, nil, nil
+    noErrors(CH)
+    reportGlobals()
+end
+
+scenarios.professions_ui = function()
+    local CH = boot()
+    local P, Page = CH.Professions, CH.ProfessionsPage
+    _G.C_Spell = { GetSpellName = function(id) return ({ [2330] = "Minor Healing Potion" })[id] end }
+    peerSend(CH, "REC", { y = "craft", r = { id = "Thrall Stormrage|171", owner = "Thrall Stormrage", rev = 1,
+        updatedAt = Stub.serverTime, skillLine = 171, skill = 200, maxSkill = 225, source = "scan",
+        scannedAt = Stub.serverTime - 3600, recipes = P.EncodeRecipes({ 2330 }) } })
+    SlashCmdList.CASUALHUB("professions")
+    local page = CH.UI.pageFrames.professions
+    check(page and page:IsShown() and not CH.UI.navButtons.professions.badge:IsShown() and #page.list.items == 1,
+        "/chub professions lists crafters; no longer marked 'soon'")
+    page.search:SetText("healing")
+    page.search:GetScript("OnTextChanged")(page.search, true)
+    check(#page.list.items == 1 and page.list.items[1].recipeName == "Minor Healing Potion", "search finds the recipe")
+    Page:Select(page.list.items[1])
+    check(contains(page.detailTitle:GetText(), "Thrall Stormrage") and contains(page.detailBody:GetText(), "profession window")
+        and page.lines.items[2] and contains(page.lines.items[2], "Minor Healing Potion"), "crafter detail with source and recipes")
+    local requestButton
+    for _, b in ipairs(page.actionButtons) do if b:IsShown() and b:GetText() == "Request a craft" then requestButton = b end end
+    check(requestButton, "Request a craft offered")
+    requestButton:RunScript("OnClick")
+    local ed = page.editor
+    check(ed:IsShown() and ed.item:GetText() == "Minor Healing Potion" and ed.profession:Get() == 171,
+        "request editor prefilled from the recipe")
+    ed.quantity:SetText("3")
+    Page:SaveEditor()
+    local q = P:Requests()[1]
+    check(not ed:IsShown() and q and q.title == "Minor Healing Potion" and q.quantity == 3 and Page.view == "requests",
+        "request posted from the crafter view")
+    check(contains(page.detailBody:GetText(), "Known crafters") and contains(page.detailBody:GetText(), "Thrall Stormrage"),
+        "request shows who can craft it")
+
+    Page:SetView("mine")
+    check(page.mineTools:IsShown() and not page.crafterTools:IsShown() and page.empty:IsShown(), "My professions view")
+    page.addManual:RunScript("OnClick")
+    check(P:MyEntry(171) and P:MyEntry(171).source == "manual" and page.mineEditor:IsShown(), "add a profession by hand")
+    page.mineEditor.specialty:SetText("Elixirs")
+    page.mineEditor.skill:SetText("90")
+    Page:SaveMine()
+    check(P:MyEntry(171).specialty == "Elixirs" and P:MyEntry(171).skill == 90, "specialty and skill saved")
+    _G.C_Spell = nil
     noErrors(CH)
     reportGlobals()
 end

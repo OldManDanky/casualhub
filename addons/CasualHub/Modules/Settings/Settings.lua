@@ -42,8 +42,8 @@ function SettingsPage:Build(frame)
         L["When off, guildmates' copies of your profile are removed and nothing is sent."],
         function(v) S:Set("profile.share", v) end)
     frame.share:SetPoint("TOPLEFT", 12, -32)
-    frame.notifyActivities = W.Checkbox(sharing, L["Activity Board messages in chat"],
-        L["A chat line when someone volunteers for your request, or you're accepted for one."],
+    frame.notifyActivities = W.Checkbox(sharing, L["Activity and crafting messages in chat"],
+        L["A chat line when someone volunteers for or offers to help with your request, or you're accepted for one."],
         function(v) S:Set("notifications.activities", v) end)
     frame.notifyActivities:SetPoint("TOPLEFT", 300, -32)
     frame.notifyEvents = W.Checkbox(sharing, L["Event reminders"],
