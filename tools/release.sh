@@ -9,7 +9,30 @@
 #
 # Token: $GITHUB_TOKEN, or the file ~/.config/casualhub/github_token (chmod 600).
 # It needs a fine-grained token for this repo with Contents: read and write.
+#
+# CurseForge: the same zip is also uploaded there when ~/.config/casualhub/curseforge_token
+# (or $CF_API_TOKEN) exists. Project id and game version ids are below; list the ids with
+#   tools/release.sh --cf-versions
 set -euo pipefail
+
+CF_PROJECT_ID=${CF_PROJECT_ID:-1819129}      # CurseForge project id (About Project box on the project page)
+CF_GAME_VERSIONS=${CF_GAME_VERSIONS:-17053}  # WoW Forever 1.60.1 (Interface 16001); comma-separate for more
+# Uploaded as "release" so the CurseForge app installs it by default (it skips alpha/beta
+# files unless a player opts in), matching "Latest" on GitHub. CF_RELEASE_TYPE=alpha overrides.
+CF_API=https://wow.curseforge.com/api
+CF_TOKEN=${CF_API_TOKEN:-}
+CF_TOKEN_FILE="$HOME/.config/casualhub/curseforge_token"
+if [[ -z "$CF_TOKEN" && -r "$CF_TOKEN_FILE" ]]; then CF_TOKEN=$(tr -d '[:space:]' < "$CF_TOKEN_FILE"); fi
+cf_header() { local f; f=$(mktemp); chmod 600 "$f"; printf 'X-Api-Token: %s\n' "$CF_TOKEN" > "$f"; echo "$f"; }
+
+if [[ "${1:-}" == --cf-versions ]]; then
+    [[ -n "$CF_TOKEN" ]] || { echo "no CurseForge token in $CF_TOKEN_FILE" >&2; exit 1; }
+    H=$(cf_header); trap 'rm -f "$H"' EXIT
+    curl -sS --fail-with-body -H @"$H" "$CF_API/game/versions" | python3 -I -c '
+import json,sys
+for v in json.load(sys.stdin): print(v["id"], v["gameVersionTypeID"], v["name"])'
+    exit 0
+fi
 
 NOTES=${1:?usage: tools/release.sh NOTES.md [AddonName]}
 ADDON=${2:-CasualHub}
@@ -22,6 +45,11 @@ TOKEN_FILE="$HOME/.config/casualhub/github_token"
 if [[ -z "$TOKEN" && -r "$TOKEN_FILE" ]]; then TOKEN=$(tr -d '[:space:]' < "$TOKEN_FILE"); fi
 [[ -n "$TOKEN" ]] || { echo "no token: set GITHUB_TOKEN or create $TOKEN_FILE" >&2; exit 1; }
 [[ -r "$NOTES" ]] || { echo "notes file not found: $NOTES" >&2; exit 1; }
+CF=false
+if [[ -n "$CF_TOKEN" ]]; then
+    [[ -n "$CF_PROJECT_ID" && -n "$CF_GAME_VERSIONS" ]] || { echo "CurseForge token found but CF_PROJECT_ID/CF_GAME_VERSIONS not set" >&2; exit 1; }
+    CF=true
+fi
 
 VERSION=$(grep -m1 '^## Version:' "addons/$ADDON/$ADDON.toc" | awk '{print $3}' | tr -d '\r')
 TAG="v$VERSION"
@@ -64,3 +92,17 @@ api -X POST -H "Content-Type: application/zip" --data-binary @"$ZIP" \
     "https://uploads.github.com/repos/$REPO/releases/$RID/assets?name=$(basename "$ZIP")" > /dev/null
 
 echo "released $TAG: $URL"
+
+if $CF; then
+    echo "== upload to CurseForge"
+    CFH=$(cf_header); META=$(mktemp); trap 'rm -f "$HDR" "$CFH" "$META"' EXIT
+    python3 -I -c 'import json,sys; json.dump({"changelog": open(sys.argv[1], encoding="utf-8").read(),
+        "changelogType": "markdown", "displayName": sys.argv[2], "releaseType": sys.argv[3],
+        "gameVersions": [int(x) for x in sys.argv[4].split(",")]}, open(sys.argv[5], "w"))' \
+        "$NOTES" "Casual Hub $VERSION" "${CF_RELEASE_TYPE:-release}" \
+        "$CF_GAME_VERSIONS" "$META"
+    curl -sS --fail-with-body -H @"$CFH" -F "metadata=<$META;type=application/json" -F "file=@$ZIP" \
+        "$CF_API/projects/$CF_PROJECT_ID/upload-file" > /dev/null \
+        || { echo "CurseForge upload failed (GitHub release is done)" >&2; exit 1; }
+    echo "uploaded to CurseForge project $CF_PROJECT_ID"
+fi
