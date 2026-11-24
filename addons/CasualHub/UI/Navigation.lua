@@ -15,6 +15,8 @@ CH.NAVIGATION = {
         summary = L["Scheduled events with role-based signups, waitlists, participant suggestions and reminders."] },
     { id = "professions", title = L["Professions"], icon = "Interface\\Icons\\Trade_BlackSmithing", phase = 5,
         summary = L["Find crafters by recipe, publish your professions and post crafting requests."] },
+    { id = "prices", title = L["Prices"], icon = "Interface\\Icons\\INV_Misc_Coin_02",
+        summary = L["Search auction prices from your Auctionator scans and ask guildmates for theirs."] },
     { id = "bulletin", title = L["Bulletin"], icon = "Interface\\Icons\\INV_Scroll_03", phase = 6,
         summary = L["Officer announcements, pinned guild rules and a welcome checklist for new members."] },
     { id = "settings", title = L["Settings"], icon = "Interface\\Icons\\INV_Misc_Gear_01" },

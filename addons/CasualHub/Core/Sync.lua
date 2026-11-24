@@ -33,7 +33,8 @@ local TOMBSTONE_TTL = 30 * 86400
 local Stats = Sync.stats
 
 -- spec = { namespace = "profiles", validate = function(record) return cleanRecord | nil, reason end,
---          maxRecords = 500, prune = function(record, now) return true to delete end (optional) }
+--          maxRecords = 500, prune = function(record, now) return true to delete end (optional),
+--          bulk = true to send its records behind all other traffic (optional) }
 function Sync:RegisterType(name, spec)
     assert(type(spec.namespace) == "string" and type(spec.validate) == "function", "invalid sync type")
     CH.Store:RegisterNamespace(spec.namespace, "guild")
@@ -206,7 +207,7 @@ function Sync:PublishLocal(typeName, record)
     if not CH.Store:Put(spec.namespace, clean.id, clean) then return false end
     changed(spec, not existing)
     CH.Events:Publish("SYNC_RECORD_CHANGED", typeName, clean.id, clean)
-    CH.Comm:Send("REC", { y = typeName, r = wireCopy(clean) }, "GUILD")
+    CH.Comm:Send("REC", { y = typeName, r = wireCopy(clean) }, "GUILD", nil, spec.bulk)
     return true
 end
 
@@ -262,7 +263,7 @@ end
 function Sync:SendRecord(typeName, id, target)
     local record = self:Get(typeName, id)
     if not record then return false end
-    return CH.Comm:Send("REC", { y = typeName, r = wireCopy(record) }, "WHISPER", target)
+    return CH.Comm:Send("REC", { y = typeName, r = wireCopy(record) }, "WHISPER", target, self.types[typeName].bulk)
 end
 
 function Sync:OnSummary(sender, body)

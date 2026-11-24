@@ -785,12 +785,20 @@ local CALLER = "Casual Hub"
 
 function Professions:PricesAvailable()
     local api = Auctionator and Auctionator.API and Auctionator.API.v1
-    return api ~= nil and type(api.GetAuctionPriceByItemID) == "function"
+    if api ~= nil and type(api.GetAuctionPriceByItemID) == "function" then return true end
+    return CH.Prices ~= nil and CH.Prices.ready and CH.Prices:HasGuildPrices()
 end
 
--- Returns copper, ageDays (nil when unknown).
+-- Returns copper, ageDays (nil when unknown), by (nil for your own scan, else who scanned it).
+-- Your own Auctionator scan first; otherwise the freshest guild price (Prices module).
 function Professions:Price(itemID)
-    if not itemID or not self:PricesAvailable() then return nil end
+    if not itemID then return nil end
+    if CH.Prices and CH.Prices.ready then
+        local price, day, by = CH.Prices:Best(tostring(itemID))
+        if price then return price, CH.Prices.Today() - day, by end
+        return nil
+    end
+    if not self:PricesAvailable() then return nil end
     local api = Auctionator.API.v1
     local ok, price = pcall(api.GetAuctionPriceByItemID, CALLER, itemID)
     if not ok or type(price) ~= "number" then return nil end
@@ -802,8 +810,12 @@ function Professions:Price(itemID)
     return price, age
 end
 
--- Price age as shown next to every price: always "your scan", never live.
-function Professions:PriceAgeText(age)
+-- Price age as shown next to every price: always a scan, never live.
+function Professions:PriceAgeText(age, by)
+    if by then
+        if age == 0 then return (L["%s's Auctionator scan today, not live"]):format(by) end
+        return (L["%s's Auctionator scan %d day(s) ago, not live"]):format(by, age or 0)
+    end
     if age == 0 then return L["your Auctionator scan today, not live"] end
     if age then return (L["your Auctionator scan %d day(s) ago, not live"]):format(age) end
     return L["your Auctionator scan, not live"]

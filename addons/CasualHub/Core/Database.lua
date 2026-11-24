@@ -22,6 +22,7 @@ local DEFAULT_SETTINGS = {
     profile = { share = true },              -- profiles are shared by default (opt-out)
     professions = { share = true },          -- professions and recipes too
     blacklist = { warn = { group = true, invite = true, tooltip = true, chat = true } },
+    prices = { answer = true, shareMats = true },  -- answer guild price questions; share material prices
     -- Chat lines: someone volunteers / you're accepted; event reminders `eventLead` minutes before the start.
     notifications = { activities = true, events = true, eventLead = 15, notices = true },
 }

@@ -1520,6 +1520,31 @@ scenarios.perf = function()
         SlashCmdList.CASUALHUB(page)
         timed("open + refresh page " .. page, function() CH.UI:SelectPage(page) end)
     end
+    -- Prices at the size measured on Forever: ~7,300 items plus ~33,000 random-enchant variants of ~1,600 more.
+    do
+        local PR, db, names, suffixes = CH.Prices, {}, {}, {}
+        for i = 1, 40 do suffixes[i] = "of the Suffix" .. string.char(65 + i % 26) .. string.char(65 + math.floor(i / 26)) end
+        local day = PR.Today()
+        for id = 1, 7300 do db[tostring(id)] = { m = 100 + id }; names[id] = "Item Name " .. id end
+        for id = 10001, 11600 do
+            names[id] = "Gear Piece " .. id
+            for i = 1, 21 do db["gr:" .. id .. ":" .. suffixes[i]] = { m = 5000 } end
+        end
+        local D = { db = db }
+        function D:GetPrice(k) return self.db[k] and self.db[k].m end
+        function D:GetPriceAge() return 0 end
+        _G.Auctionator = { Database = D }
+        _G.C_Item = { GetItemNameByID = function(id) return names[id] end,
+            GetItemInfoInstant = function(id) return id, nil, nil, nil, nil, id % 9 == 0 and 7 or 4 end }
+        PR.variants = nil
+        timed("Prices: read Auctionator (40k entries)", function() PR.variants = nil; PR:Variants() end, 3)
+        timed("Prices: build name index (8.9k names)", function() PR.indexKnown = nil; PR:BuildIndex() end, 3)
+        timed("Prices:Search('item name 12')", function() PR:Search("item name 12") end)
+        timed("Prices:Search('gear piece 105')", function() PR:Search("gear piece 105") end)
+        timed("Prices:Search('of the suffix')", function() PR:Search("of the suffix") end, 3)
+        timed("Prices:CollectMaterials()", function() PR:CollectMaterials() end, 3)
+        _G.Auctionator, _G.C_Item = nil, nil
+    end
     timed("Sync:Prune()", function() S:Prune() end)
     collectgarbage("collect")
     print(("  memory after all of the above: %.0f KB"):format(collectgarbage("count")))
@@ -1683,6 +1708,214 @@ scenarios.blacklist_ui = function()
     page.warn.chat:RunScript("OnClick")
     check(CH.Settings:Get("blacklist.warn.chat") == false, "warning toggles saved")
     fakeUnits({})
+    noErrors(CH)
+    reportGlobals()
+end
+
+---------------------------------------------------------------------------
+-- Prices (0.8.0)
+---------------------------------------------------------------------------
+
+-- An Auctionator with a price database, as Forever's Auctionator 352 has. days: Auctionator day numbers.
+local function fakeAuctionator(CH, entries)
+    local db = {}
+    for key, e in pairs(entries) do
+        db[key] = { h = { [tostring(e.day)] = e.price }, l = { [tostring(e.day)] = e.low or e.price }, m = e.price }
+    end
+    local D = { db = db }
+    function D:GetPrice(key) return self.db[key] and self.db[key].m end
+    function D:GetPriceAge(key)
+        local e = self.db[key]
+        if not e then return nil end
+        local newest = 0
+        for d in pairs(e.h) do newest = math.max(newest, tonumber(d)) end
+        return CH.Prices.Today() - newest
+    end
+    function D:GetPriceHistory(key)
+        local e, out = self.db[key], {}
+        for d, high in pairs(e and e.h or {}) do out[#out + 1] = { rawDay = d, minSeen = e.l[d], maxSeen = high } end
+        table.sort(out, function(a, b) return a.rawDay > b.rawDay end)
+        return out
+    end
+    function D:GetMeanPrice(key) return self.db[key] and self.db[key].m end
+    _G.Auctionator = { Database = D, API = { v1 = {
+        GetAuctionPriceByItemID = function(_, id) return D:GetPrice(tostring(id)) end,
+        GetAuctionAgeByItemID = function(_, id) return D:GetPriceAge(tostring(id)) end,
+        GetVendorPriceByItemID = function(_, id) return id == 2840 and 10 or nil end } } }
+    return D
+end
+
+local ITEM_NAMES = { [2840] = "Copper Bar", [2589] = "Linen Cloth", [14902] = "Saltstone Shield", [12360] = "Arcanite Bar" }
+local ITEM_CLASSES = { [2840] = 7, [2589] = 7, [14902] = 4, [12360] = 7 }
+local function fakeItems(names)
+    local requested = {}
+    _G.C_Item = {
+        GetItemNameByID = function(id) return names[id] end,
+        GetItemInfoInstant = function(id) return id, nil, nil, nil, nil, ITEM_CLASSES[id] end,
+        RequestLoadItemDataByID = function(id) requested[#requested + 1] = id end,
+    }
+    return requested
+end
+
+scenarios.prices = function()
+    local CH = boot()
+    local PR = CH.Prices
+    local today = PR.Today()
+    check(PR.ready and CH.UI:HasPage("prices"), "Prices module running with a page")
+    check(PR.ParseKey("2840") == 2840 and select(2, PR.ParseKey("gr:14902:of Spirit")) == "of Spirit"
+        and PR.ParseKey("gr:1:bad|x") == nil and PR.ParseKey("12;3") == nil, "price keys parsed strictly")
+
+    -- Without Auctionator: nothing local, nothing answered.
+    check(not PR:HasAuctionator() and PR:Own("2840") == nil and #PR:Search("copper") == 0, "no Auctionator, no local prices")
+
+    -- Your Auctionator data; names are learned in the background (only two known to the client at first).
+    fakeAuctionator(CH, {
+        ["2840"] = { price = 150, day = today },
+        ["2589"] = { price = 40, day = today - 1, low = 35 },
+        ["gr:14902:of Spirit"] = { price = 50000, day = today - 3 },
+        ["gr:14902:of the Owl"] = { price = 42000, day = today - 3 },
+    })
+    local requested = fakeItems({ [2840] = "Copper Bar", [2589] = "Linen Cloth" })
+    PR:BuildIndex()
+    Stub.advance(1)
+    check(#requested == 1 and requested[1] == 14902 and PR:IndexProgress() ~= nil, "unknown item names requested")
+    _G.C_Item.GetItemNameByID = function(id) return ITEM_NAMES[id] end
+    Stub.fire("ITEM_DATA_LOAD_RESULT", 14902, true)
+    Stub.advance(20)
+    check(PR:Name(14902) == "Saltstone Shield" and PR:IndexProgress() == nil, "name index complete")
+    _G.C_Item.GetItemNameByID = function() return nil end  -- from now on only the index knows names
+
+    local p, d = PR:Own("2840")
+    check(p == 150 and d == today, "your own price and scan day")
+    local hits = PR:Search("copper")
+    check(#hits == 1 and hits[1].key == "2840" and hits[1].name == "Copper Bar", "search by name")
+    hits = PR:Search("shield of the owl")
+    check(#hits == 1 and hits[1].key == "gr:14902:of the Owl", "search finds random-enchant variants")
+    check(#PR:Search("saltstone") == 2, "a base name lists its variants")
+    local h = PR:History("2589")
+    check(#h == 1 and h[1].low == 35 and h[1].high == 40, "daily history")
+
+    -- Answering a guildmate's question.
+    drain()
+    peerSend(CH, "PQ", { n = "q1", k = "2840" }, "GUILD", "Thrall Stormrage")
+    Stub.advance(3)
+    local answers = sentMessages(CH, "PA")
+    check(#answers == 1 and answers[1].channel == "GUILD" and answers[1].b.r[1].p == 150 and answers[1].b.r[1].d == today,
+        "question answered on the guild channel")
+    drain()
+    peerSend(CH, "PQ", { n = "q2", t = "linen" }, "GUILD", "Jaina Proudmoore")
+    Stub.advance(3)
+    answers = sentMessages(CH, "PA")
+    check(#answers == 1 and answers[1].b.r[1].k == "2589" and answers[1].b.r[1].m == "Linen Cloth", "text questions answered with names")
+    -- Someone already answered with a fresher scan: stay quiet.
+    drain()
+    peerSend(CH, "PQ", { n = "q3", k = "2589" }, "GUILD", "Thrall Stormrage")
+    peerSend(CH, "PA", { n = "q3", r = { { k = "2589", p = 38, d = today } } }, "GUILD", "Jaina Proudmoore")
+    Stub.advance(3)
+    check(#sentMessages(CH, "PA") == 0, "no answer when a fresher one was already given")
+    drain()
+    peerSend(CH, "PQ", { n = "q4", k = "2840" }, "GUILD", "Varian Wrynn")
+    peerSend(CH, "PQ", { n = "q4b", k = "2589" }, "GUILD", "Varian Wrynn")
+    Stub.advance(3)
+    check(#sentMessages(CH, "PA") == 1, "questions from one sender are rate-limited")
+    drain()
+    CH.Settings:Set("prices.answer", false)
+    Stub.advance(5)
+    peerSend(CH, "PQ", { n = "q5", k = "2840" }, "GUILD", "Varian Wrynn")
+    Stub.advance(3)
+    check(#sentMessages(CH, "PA") == 0, "answering can be turned off")
+    CH.Settings:Set("prices.answer", true)
+
+    -- Asking, and hearing answers.
+    drain()
+    check(PR:Ask("12360"), "ask about an item")
+    check(not PR:Ask("12360"), "asking again right away is refused")
+    local q = sentMessages(CH, "PQ")
+    check(#q == 1 and q[1].b.k == "12360" and q[1].channel == "GUILD", "question sent on the guild channel")
+    peerSend(CH, "PA", { n = q[1].b.n, r = { { k = "12360", p = 900000, d = today - 1, m = "Arcanite Bar" },
+        { k = "999", p = -5, d = today }, { k = "1|2", p = 5, d = today } } }, "GUILD", "Thrall Stormrage")
+    check(#PR.answers == 1 and PR.answers[1].by == "Thrall Stormrage", "answer received; malformed entries dropped")
+    local gp, gd, gby = PR:Guild("12360")
+    check(gp == 900000 and gd == today - 1 and gby == "Thrall Stormrage" and PR:Name(12360) == "Arcanite Bar",
+        "guild answer cached with its name")
+    check(#PR:Search("arcanite") == 1, "items learned from answers are searchable")
+    -- Answers to other people's questions are cached too.
+    peerSend(CH, "PA", { n = "other", r = { { k = "2840", p = 140, d = today } } }, "GUILD", "Jaina Proudmoore")
+    local bp, bd, bby = PR:Best("2840")
+    check(bp == 150 and bby == nil, "your own scan wins on the same day")
+    peerSend(CH, "PA", { n = "other2", r = { { k = "2589", p = 39, d = today } } }, "GUILD", "Jaina Proudmoore")
+    bp, bd, bby = PR:Best("2589")
+    check(bp == 38 and bby == "Jaina Proudmoore", "a newer guild scan wins over an older own scan (first answer of a day kept)")
+
+    -- Professions use guild prices when you have none.
+    local cp, cage, cby = CH.Professions:Price(12360)
+    check(cp == 900000 and cage == 1 and cby == "Thrall Stormrage", "crafting costs fall back to guild prices")
+    check(contains(CH.Professions:PriceAgeText(cage, cby), "Thrall Stormrage's Auctionator scan"), "price source shown")
+
+    -- Material packs: published in the low-priority queue, read back by guildmates.
+    local pack = CH.Sync:Get("pricepack", "Ghazneth Strongbow|1")
+    check(pack and pack.day == today, "materials pack published after login")
+    drain()
+    _G.Auctionator.Database.db["2840"].m = 160
+    CH.Comm.tokens, CH.Comm.lastRefill = 0, GetTime()  -- out of send budget: everything queues
+    check(PR:PublishMaterials(true) == 1, "changed prices republished")
+    CH.Comm:Send("HI", {}, "GUILD")
+    check(#CH.Comm.bulkQueue > 0 and #CH.Comm.queue == 1, "pack queued in the low-priority queue")
+    Stub.advance(1)
+    check(#Stub.sent == 1 and Stub.sent[1].text:find("HI", 1, true) and #CH.Comm.bulkQueue > 0,
+        "normal traffic goes first, even when queued later")
+    Stub.advance(30)
+    check(#CH.Comm.bulkQueue == 0, "bulk queue drains")
+    check(PR:PublishMaterials() == 0, "nothing re-sent when prices haven't changed")
+    -- Shield (armor) isn't a material; copper and linen are.
+    local map = 0
+    for _ in pack.data:gmatch(";") do map = map + 1 end
+    check(map == 2, "only materials go into packs")
+    peerSend(CH, "REC", { y = "pricepack", r = { id = "Thrall Stormrage|1", owner = "Thrall Stormrage", rev = 1,
+        updatedAt = Stub.serverTime, page = 1, day = today, data = "2p:5:0;" } })  -- item 2p = 97, 5 copper
+    local mp, md, mby = PR:Guild("97")
+    check(mp == 5 and md == today and mby == "Thrall Stormrage", "guildmates' material packs are read")
+    peerSend(CH, "REC", { y = "pricepack", r = { id = "Thrall Stormrage|2", owner = "Thrall Stormrage", rev = 1,
+        updatedAt = Stub.serverTime, page = 2, day = today, data = "<script>" } })
+    check(CH.Sync:Get("pricepack", "Thrall Stormrage|2") == nil, "malformed packs rejected")
+    Stub.advance(5 * 86400)
+    CH.Sync:Prune()
+    check(CH.Sync:Get("pricepack", "Thrall Stormrage|1") == nil, "old packs pruned")
+    Stub.advance(5 * 86400)
+    PR:PruneCache()
+    check(PR:Guild("12360") == nil, "old guild answers pruned")
+
+    _G.Auctionator, _G.C_Item = nil, nil
+    noErrors(CH)
+    reportGlobals()
+end
+
+scenarios.prices_ui = function()
+    local CH = boot()
+    local PR, Page = CH.Prices, CH.PricesPage
+    local today = PR.Today()
+    fakeAuctionator(CH, { ["2840"] = { price = 150, day = today }, ["gr:14902:of Spirit"] = { price = 50000, day = today - 2 } })
+    fakeItems(ITEM_NAMES)
+    SlashCmdList.CASUALHUB("prices")
+    local page = CH.UI.pageFrames.prices
+    check(page and page.scroll:IsShown() and page.answer:GetChecked() and page.shareMats:GetChecked(), "/chub prices opens")
+    check(contains(page.detailTitle:GetText(), "Item prices"), "intro shown before searching")
+    page.search:SetText("copper")
+    page.search:GetScript("OnTextChanged")(page.search, true)
+    Stub.advance(1)
+    check(#page.list.items == 1 and page.list.items[1].key == "2840", "typing searches")
+    page.list.rows[1]:RunScript("OnClick")
+    check(Page.selected == "2840" and contains(page.detailBody:GetText(), "Your scan:")
+        and contains(page.detailBody:GetText(), "Vendor sells for:"), "detail shows your price and the vendor price")
+    drain()
+    page.actionButtons[1]:RunScript("OnClick")
+    check(#sentMessages(CH, "PQ") == 1, "Ask the guild from the detail pane")
+    Page:UseLink("|cffffffff|Hitem:14902::::::::60:::::|h[Saltstone Shield of Spirit]|h|r")
+    check(Page.selected == "14902" and #page.list.items >= 1, "shift-clicked items are selected")
+    page.answer:SetChecked(false)
+    page.answer:RunScript("OnClick")
+    check(CH.Settings:Get("prices.answer") == false, "answer toggle saved")
+    _G.Auctionator, _G.C_Item = nil, nil
     noErrors(CH)
     reportGlobals()
 end

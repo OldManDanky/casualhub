@@ -19,6 +19,7 @@ local Comm = {
     RATE = 1,               -- tokens regained per second
     handlers = {},
     queue = {},
+    bulkQueue = {},          -- low priority (e.g. price packs): sent only when `queue` is empty
     buffers = {},
     bufferCount = {},
     peers = {},
@@ -82,8 +83,9 @@ end
 
 local function now() return GetTime() end
 
--- channel: "GUILD" or "WHISPER" (target = "First Last"). Returns true when queued.
-function Comm:Send(msgType, body, channel, target)
+-- channel: "GUILD" or "WHISPER" (target = "First Last"). bulk = true queues behind everything else.
+-- Returns true when queued.
+function Comm:Send(msgType, body, channel, target, bulk)
     if not self.enabled then return false end
     if channel == "WHISPER" then
         target = CH.Identity:Normalize(target)
@@ -101,8 +103,9 @@ function Comm:Send(msgType, body, channel, target)
         CH.Log:Error("could not send %s: %s", tostring(msgType), tostring(err))
         return false
     end
+    local q = bulk and self.bulkQueue or self.queue
     for _, text in ipairs(chunks) do
-        self.queue[#self.queue + 1] = { text = text, channel = channel, target = target }
+        q[#q + 1] = { text = text, channel = channel, target = target }
     end
     Stats.sent = Stats.sent + 1
     CH.Log:Debug("send %s (%d chunk%s) %s%s", msgType, #chunks, #chunks == 1 and "" or "s", channel,
@@ -140,13 +143,14 @@ function Comm:Pump()
     local t = now()
     self.tokens = math.min(self.BURST, (self.tokens or self.BURST) + (t - (self.lastRefill or t)) * self.RATE)
     self.lastRefill = t
-    if #self.queue == 0 then return end
+    if #self.queue == 0 and #self.bulkQueue == 0 then return end
     if inLockdown() then
         self:SchedulePump(5)
         return
     end
-    while #self.queue > 0 and self.tokens >= 1 do
-        local m = table.remove(self.queue, 1)
+    while (#self.queue > 0 or #self.bulkQueue > 0) and self.tokens >= 1 do
+        local q = #self.queue > 0 and self.queue or self.bulkQueue
+        local m = table.remove(q, 1)
         if m.channel == "WHISPER" and not CH.Roster:IsOnline(m.target) then
             Stats.skippedOffline = Stats.skippedOffline + 1
         else
@@ -159,7 +163,7 @@ function Comm:Pump()
                 local name = resultName(result) or tostring(result)
                 if name:find("Throttle") then
                     Stats.throttled = Stats.throttled + 1
-                    table.insert(self.queue, 1, m)
+                    table.insert(q, 1, m)
                     self.tokens = 0
                     break
                 end
@@ -171,7 +175,7 @@ function Comm:Pump()
             end
         end
     end
-    if #self.queue > 0 then self:SchedulePump(1 / self.RATE) end
+    if #self.queue > 0 or #self.bulkQueue > 0 then self:SchedulePump(1 / self.RATE) end
 end
 
 ---------------------------------------------------------------------------

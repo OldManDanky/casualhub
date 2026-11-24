@@ -177,19 +177,19 @@ function Page:CostLines(recipeID, count, add)
     end
     add(L["Materials"], table.concat(parts, ", "))
     if P:PricesAvailable() then
-        local _, age = P:Price(cost.mats[1].itemID)
+        local _, age, by = P:Price(cost.mats[1].itemID)
         local total = cost.missing == #cost.mats and ("|cff999999" .. L["no prices"] .. "|r") or
             (CH.FormatMoney(cost.total) .. (cost.missing > 0 and ("  |cffe8a040" .. (L["%d without a price"]):format(cost.missing) .. "|r") or ""))
         add(L["Material cost"], total)
         if cost.item then
-            local sell, sellAge = P:Price(cost.item)
+            local sell, sellAge, sellBy = P:Price(cost.item)
             if sell then
+                age, by = sellAge, sellBy
                 add(L["Sells for"], ("%s %s"):format(CH.FormatMoney(sell * (count or 1)),
                     (count and count > 1) and ("|cff999999" .. (L["(%d at %s)"]):format(count, CH.FormatMoney(sell)) .. "|r") or ""))
             end
-            age = sellAge or age
         end
-        add(L["Prices"], "|cff999999" .. P:PriceAgeText(age) .. "|r")
+        add(L["Prices"], "|cff999999" .. P:PriceAgeText(age, by) .. "|r")
     end
     return cost
 end
@@ -381,10 +381,10 @@ function Page:RenderRequest()
     if cost then
         shopping = cost.mats
     elseif q.itemID or q.kind == "materials" then
-        local price, age = P:Price(q.itemID)
+        local price, age, by = P:Price(q.itemID)
         if price then
             add(L["Auction price"], ("%s  |cff999999(%s)|r"):format(CH.FormatMoney(price * (q.quantity or 1)),
-                P:PriceAgeText(age)))
+                P:PriceAgeText(age, by)))
         end
         shopping = { { itemID = q.itemID, qty = q.quantity or 1, name = q.title } }
     end
