@@ -147,6 +147,7 @@ CH:RegisterModule(MODULE, {
     description = L["Home screen with guild summary"],
     initialize = function()
         CH.UI:RegisterPage("dashboard", {
+            minHeight = 360,  -- scrolls on shorter windows (UI:CreatePageFrame)
             build = function(frame) Dashboard:Build(frame) end,
             onShow = function() Dashboard:OnShow() end,
         })

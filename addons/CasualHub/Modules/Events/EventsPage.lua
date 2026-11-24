@@ -692,6 +692,7 @@ CH:RegisterModule(MODULE, {
     dependencies = { "Events" },
     initialize = function()
         CH.UI:RegisterPage("events", {
+            minHeight = 520,  -- scrolls on shorter windows (UI:CreatePageFrame)
             build = function(frame) Page:Build(frame) end,
             onShow = function() Page:OnShow() end,
         })

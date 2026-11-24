@@ -568,6 +568,7 @@ CH:RegisterModule(MODULE, {
     dependencies = { "Bulletin", "Analytics" },
     initialize = function()
         CH.UI:RegisterPage("bulletin", {
+            minHeight = 570,  -- scrolls on shorter windows (UI:CreatePageFrame)
             build = function(frame) Page:Build(frame) end,
             onShow = function() Page:OnShow() end,
         })

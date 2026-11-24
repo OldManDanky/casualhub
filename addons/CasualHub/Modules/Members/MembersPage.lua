@@ -379,6 +379,7 @@ CH:RegisterModule(MODULE, {
     dependencies = { "Profiles" },
     initialize = function()
         CH.UI:RegisterPage("members", {
+            minHeight = 540,  -- scrolls on shorter windows (UI:CreatePageFrame)
             build = function(frame) Page:Build(frame) end,
             onShow = function() Page:OnShow() end,
         })

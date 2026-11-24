@@ -276,6 +276,44 @@ function UI:RefreshNav()
     end
 end
 
+-- Every page lives in its own scroll frame. A page sets frame.minHeight (or spec.minHeight) to the height
+-- its fixed layout needs; when the window is shorter than that, the page keeps that height and a scroll
+-- bar appears. Otherwise the page fills the workspace and there is no scroll bar.
+local SCROLLBAR_SPACE = 26
+
+function UI:CreatePageFrame(spec)
+    local content = self.content
+    local scroll = CreateFrame("ScrollFrame", nil, content, "UIPanelScrollFrameTemplate")
+    scroll:SetPoint("TOPLEFT", 0, 0)
+    scroll:SetPoint("BOTTOMRIGHT", 0, 0)
+    scroll.scrollBarHideable = true  -- the template hides the bar itself when there is nothing to scroll
+    local frame = CreateFrame("Frame", nil, scroll)
+    scroll:SetScrollChild(frame)
+    frame.scroll = scroll
+    local bar = scroll.ScrollBar
+    if type(bar) ~= "table" or not bar.SetShown then bar = nil end
+    local overflowing
+
+    function frame.FitToWindow()
+        local w, h = content:GetWidth() or 0, content:GetHeight() or 0
+        if w <= 0 or h <= 0 then return end
+        local need = tonumber(frame.minHeight or (spec and spec.minHeight)) or 0
+        local over = need > h
+        if over ~= overflowing then
+            overflowing = over
+            scroll:ClearAllPoints()
+            scroll:SetPoint("TOPLEFT", 0, 0)
+            scroll:SetPoint("BOTTOMRIGHT", over and -SCROLLBAR_SPACE or 0, 4)
+            if bar then bar:SetShown(over) end
+            if not over then scroll:SetVerticalScroll(0) end
+        end
+        frame:SetSize(math.max(1, w - (over and SCROLLBAR_SPACE or 0)), over and need or (h - 4))
+    end
+    content:HookScript("OnSizeChanged", function() frame.FitToWindow() end)
+    frame.FitToWindow()
+    return frame
+end
+
 function UI:SelectPage(id)
     local entry = CH.NavigationEntry(id)
     if not entry then id, entry = "dashboard", CH.NavigationEntry("dashboard") end
@@ -288,7 +326,7 @@ function UI:SelectPage(id)
         local frame = self.pageFrames[previous]
         local spec = self.pages[previous]
         if frame then
-            frame:Hide()
+            frame.scroll:Hide()
             if spec and spec.onHide then CH.SafeCall("page hide " .. previous, spec.onHide, frame) end
         end
     end
@@ -296,15 +334,16 @@ function UI:SelectPage(id)
     local frame = self.pageFrames[id]
     local spec = self.pages[id]
     if not frame then
-        frame = CreateFrame("Frame", nil, self.content)
-        frame:SetAllPoints()
+        frame = self:CreatePageFrame(spec)
         self.pageFrames[id] = frame
         if spec and spec.build then
             CH.SafeCall("page build " .. id, spec.build, frame)
         else
             buildPlaceholder(frame, entry)
         end
+        frame.FitToWindow()
     end
+    frame.scroll:Show()
     frame:Show()
     self.currentPage = id
     CH.Settings:Set("lastPage", id)

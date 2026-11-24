@@ -321,6 +321,7 @@ CH:RegisterModule(MODULE, {
     dependencies = { "Blacklist" },
     initialize = function()
         CH.UI:RegisterPage("blacklist", {
+            minHeight = 380,  -- scrolls on shorter windows (UI:CreatePageFrame)
             build = function(frame) Page:Build(frame) end,
             onShow = function() Page:OnShow() end,
         })

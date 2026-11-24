@@ -108,14 +108,22 @@ scenarios.fresh = function()
         CH.UI:SelectPage(entry.id)
         check(CH.UI.currentPage == entry.id and CH.UI.pageFrames[entry.id]:IsShown(), "page " .. entry.id .. " opens")
     end
-    check(not CH.UI.pageFrames.dashboard:IsShown(), "previous page hidden")
+    check(not CH.UI.pageFrames.dashboard.scroll:IsShown(), "previous page hidden")
     local anySoon = false
     for _, b in pairs(CH.UI.navButtons) do if b.badge:IsShown() and b.badge:GetText() == "soon" then anySoon = true end end
     check(not anySoon, "every section is built: no 'soon' badges")
 
     local page = CH.UI.pageFrames.settings
-    check(page.scroll and page.content:GetHeight() > 580 and page.debug:GetParent():GetParent() == page.content,
-        "settings page scrolls: the cards live in a scroll child taller than the default window")
+    -- Pages scroll when the window is shorter than their layout, and fill the window otherwise.
+    local workspace = CH.UI.content
+    check(page.scroll and (page.minHeight or 0) > 527, "settings page needs more than the default window height")
+    workspace:SetSize(680, 500)
+    check(page:GetHeight() == page.minHeight and page:GetWidth() == 680 - 26, "short window: the page keeps its height and scrolls")
+    workspace:SetSize(680, 900)
+    check(page:GetHeight() == 896 and page:GetWidth() == 680, "tall window: the page fills it, no scroll bar")
+    local dash = CH.UI.pageFrames.dashboard
+    workspace:SetSize(680, 500)
+    check(dash:GetHeight() == 496, "pages without a minimum height just fill the window")
     page.scale.slider:SetValue(1.2)
     check(math.abs(CH.Settings:Get("scale") - 1.2) < 1e-9 and math.abs(CasualHubMainFrame:GetScale() - 1.2) < 1e-9,
         "scale slider commits and rescales the window")
