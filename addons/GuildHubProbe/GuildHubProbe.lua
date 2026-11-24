@@ -3,7 +3,8 @@
 -- (design doc §10 Compatibility Test Plan, §15 Immediate Next Steps).
 --
 -- Results live in SavedVariables (GuildHubProbeDB), which the client writes on /reload or logout.
--- Commands: /ghprobe (show report), /ghprobe run (re-run), /ghprobe reset (clear saved data).
+-- Commands: /ghprobe (show report), /ghprobe run (re-run), /ghprobe prices (Auctionator data check),
+-- /ghprobe reset (clear saved data).
 
 local ADDON_NAME = ...
 local PROBE_VERSION = "0.3.0"
@@ -799,11 +800,131 @@ for _, ev in ipairs({ "ADDON_LOADED", "PLAYER_ENTERING_WORLD", "PLAYER_LOGOUT", 
     pcall(eventFrame.RegisterEvent, eventFrame, ev)
 end
 
+---------------------------------------------------------------------------
+-- Price probe (/ghprobe prices): can Casual Hub read Auctionator's price data in-game, and how many item
+-- names does the client already know? Results go to GuildHubProbeDB.prices.
+---------------------------------------------------------------------------
+
+local function probePrices()
+    local r = { at = time(), errors = {} }
+    GuildHubProbeDB.prices = r
+    local function note(k, v) r[k] = v end
+    local loaded = C_AddOns and C_AddOns.IsAddOnLoaded and C_AddOns.IsAddOnLoaded("Auctionator")
+    note("auctionatorLoaded", describe(loaded))
+    local A = _G.Auctionator
+    note("hasDatabase", type(A) == "table" and type(A.Database) == "table" and type(A.Database.db) == "table")
+    if not r.hasDatabase then chat("prices: Auctionator database not reachable"); return end
+    local db = A.Database.db
+
+    -- Enumerate: count, key kinds, value types, time and memory.
+    local kinds, vtypes, count, plainIds, gearIds = {}, {}, 0, {}, {}
+    local t0 = debugprofilestop and debugprofilestop() or 0
+    local m0 = collectgarbage("count")
+    for k, v in pairs(db) do
+        count = count + 1
+        local ks = tostring(k)
+        local kind = ks:match("^(%a+):") or (ks:match("^%d+$") and "plain") or "other"
+        kinds[kind] = (kinds[kind] or 0) + 1
+        vtypes[type(v)] = (vtypes[type(v)] or 0) + 1
+        if kind == "plain" then plainIds[#plainIds + 1] = tonumber(ks)
+        elseif kind == "gr" or kind == "g" then
+            local id = tonumber(ks:match("^%a+:(%d+)"))
+            if id then gearIds[id] = true end
+        end
+        if not r.sampleKeys then r.sampleKeys = {} end
+        if #r.sampleKeys < 8 and (kind ~= "plain" or #r.sampleKeys < 4) then r.sampleKeys[#r.sampleKeys + 1] = ks end
+    end
+    note("enumerateMs", debugprofilestop and math.floor(debugprofilestop() - t0) or "n/a")
+    note("enumerateKB", math.floor(collectgarbage("count") - m0))
+    note("count", count); note("keyKinds", kinds); note("valueTypes", vtypes)
+    local gearBase = 0
+    for _ in pairs(gearIds) do gearBase = gearBase + 1 end
+    note("plainItems", #plainIds); note("gearBaseItems", gearBase)
+
+    -- One entry's shape and the database helpers.
+    local key = plainIds[1] and tostring(plainIds[1])
+    if key then
+        local e = db[key]
+        local shape = {}
+        if type(e) == "table" then for f, v in pairs(e) do
+            local n = 0
+            if type(v) == "table" then for _ in pairs(v) do n = n + 1 end end
+            shape[tostring(f)] = type(v) == "table" and ("table(" .. n .. ")") or describe(v)
+        end else shape.value = describe(e) end
+        note("sampleKey", key); note("sampleShape", shape)
+        local D = A.Database
+        local ok, v = pcall(D.GetPrice, D, key); note("GetPrice", ok and describe(v) or ("error: " .. tostring(v)))
+        ok, v = pcall(D.GetPriceAge, D, key); note("GetPriceAge", ok and describe(v) or ("error: " .. tostring(v)))
+        ok, v = pcall(D.GetPriceHistory, D, key); note("GetPriceHistoryDays", ok and type(v) == "table" and #v or ("error: " .. tostring(v)))
+        ok, v = pcall(D.GetMeanPrice, D, key, 7); note("GetMeanPrice7", ok and describe(v) or ("error: " .. tostring(v)))
+        if A.API and A.API.v1 and A.API.v1.GetAuctionPriceByItemID then
+            ok, v = pcall(A.API.v1.GetAuctionPriceByItemID, "GuildHub Probe", plainIds[1])
+            note("apiPrice", ok and describe(v) or ("error: " .. tostring(v)))
+        end
+    end
+
+    -- Which names does the client know right now (no loading)? And item classes (instant).
+    local known, classes, knownNames, unknown = 0, {}, {}, {}
+    t0 = debugprofilestop and debugprofilestop() or 0
+    local function checkId(id)
+        local name = C_Item and C_Item.GetItemNameByID and C_Item.GetItemNameByID(id)
+        if type(name) == "string" and name ~= "" then
+            known = known + 1
+            if #knownNames < 30 then knownNames[#knownNames + 1] = { id, name } end
+        elseif #unknown < 100 then unknown[#unknown + 1] = id end
+        if C_Item and C_Item.GetItemInfoInstant then
+            local _, _, _, _, _, classID = C_Item.GetItemInfoInstant(id)
+            classes[tostring(classID)] = (classes[tostring(classID)] or 0) + 1
+        end
+    end
+    for _, id in ipairs(plainIds) do checkId(id) end
+    for id in pairs(gearIds) do checkId(id) end
+    note("namesKnown", known); note("namesChecked", #plainIds + gearBase)
+    note("nameCheckMs", debugprofilestop and math.floor(debugprofilestop() - t0) or "n/a")
+    note("itemClasses", classes)
+
+    -- Typed name -> item: does the client resolve a name it knows?
+    local resolved, tried = 0, 0
+    for _, pair in ipairs(knownNames) do
+        tried = tried + 1
+        local id = C_Item and C_Item.GetItemInfoInstant and C_Item.GetItemInfoInstant(pair[2])
+        if id == pair[1] then resolved = resolved + 1 end
+    end
+    note("nameToId", resolved .. "/" .. tried)
+    note("sampleNames", knownNames)
+
+    -- How fast do unknown names load? Request up to 100 and count what arrives in 10 seconds.
+    if C_Item and C_Item.RequestLoadItemDataByID and #unknown > 0 then
+        local f, got, pending = CreateFrame("Frame"), 0, {}
+        for _, id in ipairs(unknown) do pending[id] = true end
+        f:RegisterEvent("ITEM_DATA_LOAD_RESULT")
+        f:SetScript("OnEvent", function(_, _, id, success)
+            if pending[id] then pending[id] = nil; if success then got = got + 1 end end
+        end)
+        for _, id in ipairs(unknown) do pcall(C_Item.RequestLoadItemDataByID, id) end
+        chat("prices: loading " .. #unknown .. " item names, 10 seconds...")
+        after(10, function()
+            f:UnregisterAllEvents()
+            note("loadRequested", #unknown); note("loadedIn10s", got)
+            chat(("prices: done. %d items in Auctionator, %d names known; /reload to save."):format(count, known))
+        end)
+    else
+        chat(("prices: done. %d items in Auctionator, %d names known; /reload to save."):format(count, known))
+    end
+end
+
 SLASH_GUILDHUBPROBE1 = "/ghprobe"
 SlashCmdList.GUILDHUBPROBE = function(msg)
     msg = (msg or ""):lower():match("^%s*(.-)%s*$")
     if msg == "run" then
         runProbe()
+    elseif msg == "prices" then
+        local ok, err = pcall(probePrices)
+        if not ok then
+            GuildHubProbeDB.prices = GuildHubProbeDB.prices or {}
+            GuildHubProbeDB.prices.crash = tostring(err)
+            chat("prices: error " .. tostring(err))
+        end
     elseif msg == "reset" then
         GuildHubProbeDB = { reports = {} }
         report = nil
