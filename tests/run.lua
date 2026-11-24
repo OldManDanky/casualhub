@@ -1617,6 +1617,18 @@ scenarios.blacklist = function()
     check(tooltipHandler ~= nil, "tooltip hook installed")
     tooltipHandler(tip)
     check(#lines == 1 and contains(lines[1], "blacklist (2)"), "tooltip marker")
+    -- In combat/instances the tooltip can hand out a secret unit token that UnitExists rejects.
+    local SECRET = setmetatable({}, { __tostring = function() return "<secret>" end })
+    local realIsSecret, realExists, errsBefore = _G.issecretvalue, _G.UnitExists, #CH.Log.persisted
+    _G.issecretvalue = function(v) return v == SECRET end
+    _G.UnitExists = function(u)
+        if u == SECRET then error("Secret values are only allowed during untainted execution for this argument.") end
+        return realExists(u)
+    end
+    local secretTip = { GetUnit = function() return "Grief", SECRET end, AddLine = function(_, text) lines[#lines + 1] = text end }
+    tooltipHandler(secretTip)
+    check(#lines == 1 and #CH.Log.persisted == errsBefore, "secret unit tokens on tooltips are skipped without an error")
+    _G.issecretvalue, _G.UnitExists = realIsSecret, realExists
     CH.Settings:Set("blacklist.warn.tooltip", false)
     tooltipHandler(tip)
     check(#lines == 1, "tooltip marker can be turned off")

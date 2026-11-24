@@ -42,8 +42,15 @@ end
 
 -- Full name of a unit ("party1", "target", ...), or nil for non-players and hidden values.
 function Blacklist.UnitKey(unit)
-    if not unit or not (UnitExists and UnitExists(unit)) then return nil end
-    if UnitIsPlayer and not UnitIsPlayer(unit) then return nil end
+    -- In combat and instances the client can hand out "secret" unit tokens (e.g. from tooltips),
+    -- which UnitExists and friends reject. Those units are simply skipped.
+    if type(unit) ~= "string" or CH.Compat.IsSecret(unit) then return nil end
+    local ok, exists = pcall(UnitExists or function() return false end, unit)
+    if not ok or not exists or CH.Compat.IsSecret(exists) then return nil end
+    if UnitIsPlayer then
+        local okP, isPlayer = pcall(UnitIsPlayer, unit)
+        if not okP or not isPlayer or CH.Compat.IsSecret(isPlayer) then return nil end
+    end
     local name
     if GetUnitName then
         local ok, n = pcall(GetUnitName, unit, true)

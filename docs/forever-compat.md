@@ -54,6 +54,9 @@ character level 29 Hunter, Guild Master of a 55-member guild. Design doc §10 as
 - `C_ChatInfo.InChatMessagingLockdown()` exists. It returned false in the open world. Instance and
   combat restrictions are not tested yet.
 - No secret values were seen in payloads or sender names (open world, out of combat).
+- **Secret values do occur on tooltips:** `GameTooltip:GetUnit()` can return a secret unit token
+  (seen 2026-11-23, likely in combat or an instance). Passing it to `UnitExists` raises "Secret values
+  are only allowed during untainted execution". Check `issecretvalue` on unit tokens before using them.
 
 ## Guild
 - `C_GuildInfo.GuildRoster()` works; the legacy `GuildRoster()` is missing. `GetGuildRosterInfo`
