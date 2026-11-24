@@ -51,7 +51,7 @@ local function buildPlaceholder(frame, entry)
     text:SetPoint("TOPLEFT", 20, y - 8)
     text:SetPoint("RIGHT", frame, "RIGHT", -20, 0)
     text:SetWordWrap(true)
-    local note = W.Label(frame, L["This section is not built yet. The guild-only alpha adds sections one phase at a time."],
+    local note = W.Label(frame, L["This section isn't available in this version."],
         "GameFontHighlightSmall", W.COLORS.muted)
     note:SetPoint("TOPLEFT", text, "BOTTOMLEFT", 0, -14)
     note:SetPoint("RIGHT", frame, "RIGHT", -20, 0)

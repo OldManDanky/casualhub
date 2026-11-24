@@ -1,4 +1,4 @@
--- Slash commands: /chub and /guildhub. Modules can add subcommands with CH.Commands:Register.
+-- Slash commands: /chub and /casualhub. Modules can add subcommands with CH.Commands:Register.
 local _, CH = ...
 local L = CH.L
 
@@ -31,7 +31,7 @@ end
 Commands:Register("help", L["list commands"], function()
     CH:Print(L["commands:"])
     CH:Print("  /chub - %s", L["open or close the window"])
-    CH:Print("  /chub <page> - %s", L["open a page (dashboard, members, activities, events, professions, bulletin, settings)"])
+    CH:Print("  /chub <page> - %s", L["open a page (dashboard, members, blacklist, activities, events, professions, prices, bulletin, settings)"])
     for _, name in ipairs(Commands.order) do
         CH:Print("  /chub %s - %s", name, Commands.list[name].help)
     end

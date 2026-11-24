@@ -23,7 +23,12 @@ Schedule raids, dungeons, world bosses, PvP nights or socials with tank, healer 
 ### 🔨 Professions
 Open your profession window once and your recipes are shared with the guild automatically. Search for anything, like "Earthen Leather Shoulders", to see who can make it, check the materials it needs, and ask a crafter directly. You can also post crafting requests and offers.
 
-**With Auctionator installed** (optional), you also get material costs and sale prices from your last scan, item tooltips with prices, and a one-click shopping list for a recipe's materials.
+**With Auctionator installed** (optional), you also get material costs and sale prices from your last scan, item tooltips with prices, and a one-click shopping list for a recipe's materials. Without Auctionator, costs use prices shared by guildmates.
+
+### 💰 Prices
+Look up auction prices anywhere, not just at the auction house. Type an item name or shift-click an item to see your latest scanned price, the 7-day average, the vendor price and your recent daily lows and highs. Random-enchant gear like "…of the Eagle" is covered too.
+
+Don't have a price? **Ask the guild:** guildmates with Auctionator answer automatically with their scanned price and how old it is. Crafting material prices are also shared after a scan, so crafting costs on the Professions page work even for members without Auctionator. Every price shows whose scan it is and how old, because these are scans, not live prices.
 
 ### 🚫 Blacklist
 A shared list of players to avoid, each with a reason. Any member can add someone. You get a popup and an alert sound when you join a group with them or they invite you, a marker on their tooltip, and a chat warning when they whisper you or open a trade. Entries can be removed by whoever added them or by an officer.
@@ -50,20 +55,21 @@ Officers post announcements and guild rules, and new members get a welcome check
 - **Looking for help?** Activities → *New request*. Pick a category, say what you need and how many people. Accept volunteers as they come in.
 - **Running something bigger?** Events → *New event*. Set the time, the roles you need and the minimum level. People sign up from the Events page.
 - **Need a crafter?** Professions → search for the item → pick a crafter → *Whisper*.
+- **What's it worth?** Prices → type the item name or shift-click it → *Ask the guild* if you have no recent price.
 - **Bad experience with someone?** Blacklist → *Add player*, type their name and a short reason.
 
 ### Commands
 | Command | What it does |
 |---|---|
 | `/chub` | Open or close the window |
-| `/chub <page>` | Open a page: `dashboard`, `members`, `blacklist`, `activities`, `events`, `professions`, `bulletin`, `settings` |
+| `/chub <page>` | Open a page: `dashboard`, `members`, `blacklist`, `activities`, `events`, `professions`, `prices`, `bulletin`, `settings` |
 | `/chub help` | List all commands |
 | `/chub resetwindow` | Move the window back to the center of the screen |
 | `/chub version` | Show the addon version |
 | `/chub diag` | Diagnostics report (useful when reporting a bug) |
 
 ### Settings
-Under **Settings** you can turn sharing of your profile or professions off, choose which blacklist warnings you get, turn activity, event and notice alerts on or off, and set how early event reminders arrive.
+Under **Settings** you can turn sharing of your profile or professions off, turn activity, event and notice alerts on or off, and set how early event reminders arrive. The **Blacklist** page has switches for each kind of warning, and the **Prices** page has switches for answering guild price questions and sharing material prices.
 
 ---
 
@@ -74,6 +80,6 @@ Under **Settings** you can turn sharing of your profile or professions off, choo
 - **Older versions keep working together**, but please update to get the newest features.
 
 ## Feedback & source
-This is a beta. Bug reports and ideas are welcome: post a comment here or open an issue on GitHub. If something breaks, include the output of `/chub diag`.
+Bug reports and ideas are welcome: post a comment here or open an issue on GitHub. If something breaks, include the output of `/chub diag`.
 
 Source code (MIT license): https://github.com/OldManDanky/casualhub
