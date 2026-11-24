@@ -10,13 +10,23 @@ local function formatScale(v) return ("%d%%"):format(math.floor(v * 100 + 0.5)) 
 
 function SettingsPage:Build(frame)
     self.frame = frame
-    local y = CH.UI:PageHeader(frame, L["Settings"], L["Saved for your account; applies to every character."])
+    -- Everything sits in a scroll frame: at the default window height the page is taller than the window.
+    local scroll = CreateFrame("ScrollFrame", nil, frame, "UIPanelScrollFrameTemplate")
+    scroll:SetPoint("TOPLEFT", 0, -4)
+    scroll:SetPoint("BOTTOMRIGHT", -28, 6)
+    local content = CreateFrame("Frame", nil, scroll)
+    content:SetSize(math.max(scroll:GetWidth() or 0, 600), 1)
+    scroll:SetScrollChild(content)
+    scroll:SetScript("OnSizeChanged", function(_, w) if w and w > 0 then content:SetWidth(w) end end)
+    frame.scroll, frame.content = scroll, content
+
+    local y = CH.UI:PageHeader(content, L["Settings"], L["Saved for your account; applies to every character."])
     local S = CH.Settings
 
     -- Appearance -------------------------------------------------------------
-    local appearance = W.Card(frame, L["Window"])
+    local appearance = W.Card(content, L["Window"])
     appearance:SetPoint("TOPLEFT", 20, y)
-    appearance:SetPoint("RIGHT", frame, "RIGHT", -20, 0)
+    appearance:SetPoint("RIGHT", content, "RIGHT", -20, 0)
     appearance:SetHeight(140)
 
     local scale = W.Slider(appearance, L["Window scale"], 0.6, 1.5, 0.05, formatScale, function(v) S:Set("scale", v) end)
@@ -34,9 +44,9 @@ function SettingsPage:Build(frame)
     reset:SetPoint("TOPRIGHT", -14, -34)
 
     -- Sharing ----------------------------------------------------------------
-    local sharing = W.Card(frame, L["Sharing and notifications"])
+    local sharing = W.Card(content, L["Sharing and notifications"])
     sharing:SetPoint("TOPLEFT", appearance, "BOTTOMLEFT", 0, -12)
-    sharing:SetPoint("RIGHT", frame, "RIGHT", -20, 0)
+    sharing:SetPoint("RIGHT", content, "RIGHT", -20, 0)
     sharing:SetHeight(92)
     frame.share = W.Checkbox(sharing, L["Share my profile with the guild"],
         L["When off, guildmates' copies of your profile are removed and nothing is sent."],
@@ -58,9 +68,9 @@ function SettingsPage:Build(frame)
     frame.eventLead:Anchor("LEFT", leadLabel, "RIGHT", 8, 0)
 
     -- Modules ----------------------------------------------------------------
-    local modules = W.Card(frame, L["Modules"])
+    local modules = W.Card(content, L["Modules"])
     modules:SetPoint("TOPLEFT", sharing, "BOTTOMLEFT", 0, -12)
-    modules:SetPoint("RIGHT", frame, "RIGHT", -20, 0)
+    modules:SetPoint("RIGHT", content, "RIGHT", -20, 0)
     modules.body:SetText("|cff999999" .. L["Turn sections on or off. Changes apply after a UI reload."] .. "|r")
     frame.moduleChecks = {}
     local row = 0
@@ -85,9 +95,9 @@ function SettingsPage:Build(frame)
     frame.reloadButton:SetPoint("TOPRIGHT", -14, -10)
 
     -- Diagnostics ------------------------------------------------------------
-    local diag = W.Card(frame, L["Diagnostics"])
+    local diag = W.Card(content, L["Diagnostics"])
     diag:SetPoint("TOPLEFT", modules, "BOTTOMLEFT", 0, -12)
-    diag:SetPoint("RIGHT", frame, "RIGHT", -20, 0)
+    diag:SetPoint("RIGHT", content, "RIGHT", -20, 0)
     diag:SetHeight(96)
     diag.body:SetText(("|cff999999Casual Hub %s  |  %s %s|r"):format(tostring(CH.version),
         tostring(CH.Compat.buildVersion), tostring(CH.Compat.buildNumber)))
@@ -101,6 +111,9 @@ function SettingsPage:Build(frame)
         CH:Print(L["saved errors cleared"])
     end)
     clear:SetPoint("TOPRIGHT", open, "BOTTOMRIGHT", 0, -6)
+
+    -- Total height of the cards above, so the scroll range ends just below the last one.
+    content:SetHeight(-y + 140 + 12 + 92 + 12 + modules:GetHeight() + 12 + 96 + 16)
 end
 
 local STATE_LABELS = {

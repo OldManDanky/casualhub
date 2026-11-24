@@ -114,6 +114,8 @@ scenarios.fresh = function()
     check(not anySoon, "every section is built: no 'soon' badges")
 
     local page = CH.UI.pageFrames.settings
+    check(page.scroll and page.content:GetHeight() > 580 and page.debug:GetParent():GetParent() == page.content,
+        "settings page scrolls: the cards live in a scroll child taller than the default window")
     page.scale.slider:SetValue(1.2)
     check(math.abs(CH.Settings:Get("scale") - 1.2) < 1e-9 and math.abs(CasualHubMainFrame:GetScale() - 1.2) < 1e-9,
         "scale slider commits and rescales the window")
